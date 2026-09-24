@@ -12,11 +12,16 @@ import json
 import sys
 from pathlib import Path
 
-# run_cypher.py sits next to this file, so Python can import it directly.
-from run_cypher import connect, load_env
-
 ROOT = Path(__file__).resolve().parent.parent
 DATA_FILE = ROOT / "data" / "incidents.json"
+
+# Python only searches this script's own folder (scripts/) for imports, so the
+# repo root has to be added before the dejavu package can be found.
+sys.path.insert(0, str(ROOT))
+
+from dejavu.normalize import normalize  # noqa: E402
+# run_cypher.py sits next to this file, so Python can import it directly.
+from run_cypher import connect, load_env  # noqa: E402
 
 
 # The values arrive as $parameters, never pasted into the query string. Two
@@ -102,7 +107,13 @@ def main():
         totals["relationships"] += result.relationships_created
 
     for inc in data["incidents"]:
-        params = dict(inc, resolution_id=f"{inc['id']}-res")
+        params = dict(
+            inc,
+            resolution_id=f"{inc['id']}-res",
+            # Same function retrieval will use on incoming alerts, so the two
+            # sides of a signature lookup can never be normalised differently.
+            error_signature=normalize(inc["error_signature"]),
+        )
         result = graph.query(INCIDENT_QUERY, params=params)
         totals["nodes"] += result.nodes_created
         totals["relationships"] += result.relationships_created
