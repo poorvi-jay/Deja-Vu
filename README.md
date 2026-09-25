@@ -107,13 +107,47 @@ Numbers with fewer than six digits are left alone, because the `1` in
 .venv\Scripts\python.exe -m pytest
 ```
 
-33 tests. The integration tests run against the live graph; they skip only if
-no database is reachable.
+45 tests. The integration tests run against the live graph; they skip only if
+no database is reachable. The Claude request is verified with a fake client, so
+the suite needs no API key and costs nothing to run.
+
+## Triage
+
+```
+.venv\Scripts\python.exe scripts\triage.py ^
+  --service refund-service ^
+  --error "HikariPool-1 - Connection is not available, request timed out after 30000ms." ^
+  --tags connection-pool,timeout,database
+```
+
+The loop is `normalize -> retrieve -> explain`, and the model only does the
+last step. It never queries the graph and never decides what is relevant; it is
+handed the incidents retrieval found and asked to write them up. So a wrong
+answer is either a retrieval bug — reproducible and covered by tests — or a
+writing problem, and the two are never tangled together.
+
+Three explainers implement the same interface:
+
+- `TemplateExplainer` (default) — deterministic, no API key, no network.
+- `OpenAIExplainer` (`--explainer openai`) — needs `OPENAI_API_KEY` in `.env`.
+  Defaults to `gpt-4o`; override with `--model`.
+- `ClaudeExplainer` (`--explainer claude`) — needs `ANTHROPIC_API_KEY` in
+  `.env` and `pip install anthropic`.
+
+Both model explainers are handed the identical system prompt and the identical
+evidence — a test asserts it. The provider is a swappable detail; what the
+model is told is not.
+
+`--show-evidence` prints the exact text the explainer was given. Anything in a
+briefing that is not in that text is fabricated, which makes that failure easy
+to spot.
 
 ## Status
 
 - **Phase 0** environment — done
 - **Phase 1** schema and data, 27 incidents across 6 root-cause families — done
 - **Phase 2** retrieval, scoring, at-risk services, CLI — done
-- **Phase 3** agent loop — not started, needs an Anthropic API key
+- **Phase 3** agent loop — done with the template explainer; the Claude
+  explainer is written and unit-tested against a fake client, but has never
+  been run against the real API
 - **Phase 4** API and demo UI — not started

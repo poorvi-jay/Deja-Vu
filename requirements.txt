@@ -1,2 +1,7 @@
 falkordb==1.7.1
 pytest==9.1.1
+
+# Explainers. Neither is needed for the template explainer, the tests, or the
+# graph itself — install whichever provider you plan to use.
+openai==3.19.2
+# anthropic
