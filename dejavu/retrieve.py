@@ -157,6 +157,37 @@ ORDER BY past_incidents DESC, service
 """
 
 
+INCIDENT_QUERY = """
+MATCH (i:Incident {id: $id})-[:AFFECTED]->(svc:Service)
+OPTIONAL MATCH (i)-[:HAS_SIGNATURE]->(sig:ErrorSignature)
+OPTIONAL MATCH (i)-[:RESOLVED_BY]->(res:Resolution)
+OPTIONAL MATCH (i)-[:TAGGED]->(t:Tag)
+RETURN i.id AS id, i.title AS title, i.severity AS severity,
+       i.occurred_at AS occurred_at, i.summary AS summary,
+       svc.name AS service, sig.normalized AS error_signature,
+       collect(DISTINCT t.name) AS tags,
+       res.action AS resolution, res.fixed_by AS fixed_by,
+       res.time_to_resolve_min AS time_to_resolve_min
+"""
+
+
+def _rows(result) -> List[dict]:
+    """Turn a FalkorDB result into a list of dicts keyed by column name."""
+    columns = [c[1] if isinstance(c, (list, tuple)) else c for c in result.header]
+    return [dict(zip(columns, row)) for row in result.result_set]
+
+
+def get_incident(graph, incident_id: str) -> Optional[dict]:
+    """One incident with everything hanging off it, or None if there is no
+    such id."""
+    rows = _rows(graph.ro_query(INCIDENT_QUERY, params={"id": incident_id}))
+    if not rows:
+        return None
+    row = rows[0]
+    row["tags"] = sorted(row["tags"] or [])
+    return row
+
+
 def find_similar(graph, alert: Alert, limit: int = 5) -> List[Match]:
     """Return past incidents resembling `alert`, best match first."""
     result = graph.ro_query(
@@ -173,10 +204,8 @@ def find_similar(graph, alert: Alert, limit: int = 5) -> List[Match]:
             "min_shared_tags": MIN_SHARED_TAGS,
         },
     )
-    columns = [c[1] if isinstance(c, (list, tuple)) else c for c in result.header]
     matches = []
-    for row in result.result_set:
-        r = dict(zip(columns, row))
+    for r in _rows(result):
         matches.append(
             Match(
                 id=r["id"],
@@ -203,8 +232,8 @@ def at_risk_services(graph, alert: Alert):
     alert's tags: a high count means the peer has hit this before and may hold
     the fix, a zero means it is exposed but has not been bitten yet.
     """
-    result = graph.ro_query(
-        AT_RISK_QUERY, params={"service": alert.service, "tags": alert.tags}
+    return _rows(
+        graph.ro_query(
+            AT_RISK_QUERY, params={"service": alert.service, "tags": alert.tags}
+        )
     )
-    columns = [c[1] if isinstance(c, (list, tuple)) else c for c in result.header]
-    return [dict(zip(columns, row)) for row in result.result_set]

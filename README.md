@@ -101,13 +101,38 @@ Numbers with fewer than six digits are left alone, because the `1` in
 `HikariPool-1`, the `509` in `x509`, HTTP `404` and the SQLSTATE code in
 `SQLSTATE(08006)` are identity, not noise.
 
+## HTTP API
+
+```
+.venv\Scripts\python.exe -m uvicorn dejavu.api:app --reload
+```
+
+Interactive docs at `http://127.0.0.1:8000/docs`.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Up, connected, and how many incidents are loaded |
+| `POST /triage` | An alert in; ranked matches, a briefing, and exposed peers out |
+| `GET /incidents/{id}` | One incident in full |
+| `GET /services` | Every service with its dependencies and incident count |
+
+```
+curl -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" ^
+  -d "{\"service\":\"refund-service\",\"error\":\"HikariPool-1 - Connection is not available, request timed out after 30000ms.\",\"tags\":[\"connection-pool\",\"timeout\"]}"
+```
+
+`/health` checks the incident count, not just the connection, so an empty
+database reports `degraded` instead of passing while answering every query with
+nothing. A database that is unreachable gives `503`, not `500` — a paused
+FalkorDB Cloud instance is a dependency being down, not a bug in this service.
+
 ## Tests
 
 ```
 .venv\Scripts\python.exe -m pytest
 ```
 
-45 tests. The integration tests run against the live graph; they skip only if
+61 tests. The integration tests run against the live graph; they skip only if
 no database is reachable. The Claude request is verified with a fake client, so
 the suite needs no API key and costs nothing to run.
 
@@ -150,4 +175,6 @@ to spot.
 - **Phase 3** agent loop — done with the template explainer; the Claude
   explainer is written and unit-tested against a fake client, but has never
   been run against the real API
-- **Phase 4** API and demo UI — not started
+- **Phase 4a** HTTP API — done
+- **Phase 4b** demo UI — not started
+- **Phase 4c** evaluation harness — not started

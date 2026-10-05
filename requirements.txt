@@ -1,5 +1,10 @@
 falkordb==1.7.1
+fastapi==0.141.1
+uvicorn==0.54.0
+
+# Tests. httpx backs FastAPI's TestClient.
 pytest==9.1.1
+httpx==0.28.1
 
 # Explainers. Neither is needed for the template explainer, the tests, or the
 # graph itself — install whichever provider you plan to use.
