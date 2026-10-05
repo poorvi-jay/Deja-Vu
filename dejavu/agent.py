@@ -23,7 +23,13 @@ Two explainers implement the same interface:
 
 from typing import List, Protocol
 
+from dejavu.budget import Budget
 from dejavu.retrieve import Alert, Match, at_risk_services, find_similar
+
+# The briefing is asked to stay under 200 words, so ~600 tokens is generous.
+# It also bounds the worst-case cost of any single call, which is what the
+# budget check is costed against.
+MAX_OUTPUT_TOKENS = 600
 
 
 class Explainer(Protocol):
@@ -145,25 +151,28 @@ on. Do not imply the shared dependency caused anything.
 class ClaudeExplainer:
     """Asks Claude to write the briefing from the retrieved evidence."""
 
-    def __init__(self, client=None, model: str = "claude-opus-5"):
+    def __init__(self, client=None, model: str = "claude-haiku-4-5", budget: Budget = None):
         if client is None:
             import anthropic  # imported lazily so the package is optional
 
             client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
         self.client = client
         self.model = model
+        self.budget = budget if budget is not None else Budget()
 
     def explain(self, alert: Alert, matches: List[Match], peers: list) -> str:
+        prompt = build_evidence(alert, matches, peers)
+        self.budget.check(self.model, SYSTEM_PROMPT + prompt, MAX_OUTPUT_TOKENS)
+
         response = self.client.messages.create(
             model=self.model,
-            # Deliberately small: the prompt asks for under 200 words, and a
-            # briefing that overruns is a briefing nobody reads at 3am.
-            max_tokens=2000,
+            max_tokens=MAX_OUTPUT_TOKENS,
             system=SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": build_evidence(alert, matches, peers)}
-            ],
+            messages=[{"role": "user", "content": prompt}],
         )
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            self.budget.record(self.model, usage.input_tokens, usage.output_tokens)
         if response.stop_reason == "refusal":
             return "The model declined to answer. Falling back to the retrieved facts above."
         return "".join(b.text for b in response.content if b.type == "text")
@@ -178,23 +187,36 @@ class OpenAIExplainer:
     detail, and swapping it should not touch retrieval or the loop.
     """
 
-    def __init__(self, client=None, model: str = "gpt-4o"):
+    # gpt-4o-mini by default, not gpt-4o. This project has a $1.25 total cap,
+    # and the task — rewriting facts it has been handed into prose — is well
+    # within a small model. gpt-4o costs roughly 17x more for the same call.
+    def __init__(self, client=None, model: str = "gpt-4o-mini", budget: Budget = None):
         if client is None:
             from openai import OpenAI  # lazy, so the package stays optional
 
             client = OpenAI()  # reads OPENAI_API_KEY
         self.client = client
         self.model = model
+        self.budget = budget if budget is not None else Budget()
 
     def explain(self, alert: Alert, matches: List[Match], peers: list) -> str:
+        prompt = build_evidence(alert, matches, peers)
+        # Raises BudgetExceeded before spending anything if the worst case
+        # would breach the cap.
+        self.budget.check(self.model, SYSTEM_PROMPT + prompt, MAX_OUTPUT_TOKENS)
+
         response = self.client.chat.completions.create(
             model=self.model,
-            max_tokens=2000,
+            max_tokens=MAX_OUTPUT_TOKENS,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_evidence(alert, matches, peers)},
+                {"role": "user", "content": prompt},
             ],
         )
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            # The API's own figures, not our estimate.
+            self.budget.record(self.model, usage.prompt_tokens, usage.completion_tokens)
         return response.choices[0].message.content or ""
 
 

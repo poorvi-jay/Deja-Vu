@@ -22,6 +22,7 @@ from dejavu.agent import (  # noqa: E402
     build_evidence,
     triage,
 )
+from dejavu.budget import Budget  # noqa: E402
 from dejavu.retrieve import Alert, Match  # noqa: E402
 
 
@@ -51,6 +52,12 @@ def alert():
         error="HikariPool-1 - Connection is not available, request timed out after 30000ms.",
         tags=["connection-pool", "timeout"],
     )
+
+
+@pytest.fixture
+def budget(tmp_path):
+    """Isolated ledger: these tests must not touch the real .spend.json."""
+    return Budget(limit_usd=1.25, ledger_path=tmp_path / "spend.json")
 
 
 @pytest.fixture
@@ -131,10 +138,20 @@ class FakeBlock:
         self.text = text
 
 
+class FakeUsage:
+    def __init__(self, input_tokens=900, output_tokens=180):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        # OpenAI names them differently for the same thing.
+        self.prompt_tokens = input_tokens
+        self.completion_tokens = output_tokens
+
+
 class FakeResponse:
     def __init__(self, text, stop_reason="end_turn"):
         self.content = [FakeBlock(text)]
         self.stop_reason = stop_reason
+        self.usage = FakeUsage()
 
 
 class FakeMessages:
@@ -152,21 +169,21 @@ class FakeClient:
         self.messages = FakeMessages(FakeResponse(text, stop_reason))
 
 
-def test_claude_explainer_sends_the_evidence_and_system_prompt(alert, peers):
+def test_claude_explainer_sends_the_evidence_and_system_prompt(alert, peers, budget):
     client = FakeClient()
-    out = ClaudeExplainer(client=client).explain(alert, [make_match()], peers)
+    out = ClaudeExplainer(client=client, budget=budget).explain(alert, [make_match()], peers)
 
     assert out == "Try raising the pool size, as in INC-001."
     call = client.messages.calls[0]
-    assert call["model"] == "claude-opus-5"
+    assert call["model"] == "claude-haiku-4-5"  # cheap by default: $1.25 cap
     assert call["system"] == SYSTEM_PROMPT
     # The evidence, and nothing but the evidence, is what the model sees.
     assert call["messages"][0]["content"] == build_evidence(alert, [make_match()], peers)
 
 
-def test_claude_explainer_handles_a_refusal(alert, peers):
+def test_claude_explainer_handles_a_refusal(alert, peers, budget):
     client = FakeClient(text="", stop_reason="refusal")
-    out = ClaudeExplainer(client=client).explain(alert, [make_match()], peers)
+    out = ClaudeExplainer(client=client, budget=budget).explain(alert, [make_match()], peers)
     assert "declined" in out
 
 
@@ -191,7 +208,7 @@ class FakeCompletions:
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        return type("Resp", (), {"choices": [FakeChoice(self.content)]})()
+        return type("Resp", (), {"choices": [FakeChoice(self.content)], "usage": FakeUsage()})()
 
 
 class FakeOpenAIClient:
@@ -199,35 +216,35 @@ class FakeOpenAIClient:
         self.chat = type("Chat", (), {"completions": FakeCompletions(content)})()
 
 
-def test_openai_explainer_sends_the_evidence_and_system_prompt(alert, peers):
+def test_openai_explainer_sends_the_evidence_and_system_prompt(alert, peers, budget):
     client = FakeOpenAIClient()
-    out = OpenAIExplainer(client=client).explain(alert, [make_match()], peers)
+    out = OpenAIExplainer(client=client, budget=budget).explain(alert, [make_match()], peers)
 
     assert out == "Raise the pool size first, as in INC-001."
     call = client.chat.completions.calls[0]
-    assert call["model"] == "gpt-4o"
+    assert call["model"] == "gpt-4o-mini"  # cheap by default: $1.25 cap
     assert call["messages"][0] == {"role": "system", "content": SYSTEM_PROMPT}
     assert call["messages"][1]["content"] == build_evidence(alert, [make_match()], peers)
 
 
-def test_openai_explainer_accepts_a_model_override(alert, peers):
+def test_openai_explainer_accepts_a_model_override(alert, peers, budget):
     client = FakeOpenAIClient()
-    OpenAIExplainer(client=client, model="gpt-4o-mini").explain(alert, [make_match()], peers)
-    assert client.chat.completions.calls[0]["model"] == "gpt-4o-mini"
+    OpenAIExplainer(client=client, model="gpt-4o", budget=budget).explain(alert, [make_match()], peers)
+    assert client.chat.completions.calls[0]["model"] == "gpt-4o"
 
 
-def test_openai_explainer_handles_empty_content(alert, peers):
+def test_openai_explainer_handles_empty_content(alert, peers, budget):
     """A filtered or empty completion returns None, not a string."""
     client = FakeOpenAIClient(content=None)
-    assert OpenAIExplainer(client=client).explain(alert, [make_match()], peers) == ""
+    assert OpenAIExplainer(client=client, budget=budget).explain(alert, [make_match()], peers) == ""
 
 
-def test_both_model_explainers_get_identical_input(alert, peers):
+def test_both_model_explainers_get_identical_input(alert, peers, budget):
     """The provider is a detail. Swapping it must not change what the model is
     told — same system prompt, same evidence, same facts."""
     openai_client, claude_client = FakeOpenAIClient(), FakeClient()
-    OpenAIExplainer(client=openai_client).explain(alert, [make_match()], peers)
-    ClaudeExplainer(client=claude_client).explain(alert, [make_match()], peers)
+    OpenAIExplainer(client=openai_client, budget=budget).explain(alert, [make_match()], peers)
+    ClaudeExplainer(client=claude_client, budget=budget).explain(alert, [make_match()], peers)
 
     openai_call = openai_client.chat.completions.calls[0]
     claude_call = claude_client.messages.calls[0]
@@ -270,3 +287,28 @@ def test_summary_only_cites_incidents_retrieval_returned(graph, alert):
     retrieved = {m.id for m in result["matches"]}
     cited = set(re.findall(r"INC-\d{3}", result["summary"]))
     assert cited <= retrieved
+
+
+def test_model_calls_are_recorded_against_the_budget(alert, peers, budget):
+    """A call that happened must show up in the ledger, or the cap is fiction."""
+    assert budget.spent == 0.0
+    OpenAIExplainer(client=FakeOpenAIClient(), budget=budget).explain(
+        alert, [make_match()], peers
+    )
+    assert budget.spent > 0
+
+    first = budget.spent
+    ClaudeExplainer(client=FakeClient(), budget=budget).explain(alert, [make_match()], peers)
+    assert budget.spent > first
+
+
+def test_an_exhausted_budget_blocks_the_call_entirely(alert, peers, budget):
+    """No request is made once the cap is reached - it raises before the SDK is
+    touched, so there is nothing to bill."""
+    from dejavu.budget import BudgetExceeded
+
+    budget.record("gpt-4o", 0, 1_000_000)  # $10, far past the cap
+    client = FakeOpenAIClient()
+    with pytest.raises(BudgetExceeded):
+        OpenAIExplainer(client=client, budget=budget).explain(alert, [make_match()], peers)
+    assert client.chat.completions.calls == []  # never called
