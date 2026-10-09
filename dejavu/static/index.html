@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Déjà Vu</title>
+  <meta name="description" content="Graph-backed incident memory: what happened last time, and who else is exposed.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/triage">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.2" fill="currentColor"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </span>
+      <span>
+        <span class="brand-name">Déjà Vu</span>
+        <span class="brand-sub">Incident memory</span>
+      </span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="#/triage" data-route="triage">Triage</a>
+      <a href="#/incidents" data-route="incidents">Incidents</a>
+      <a href="#/services" data-route="services">Services</a>
+    </nav>
+    <div class="status">
+      <span id="budget-pill" class="pill pill-muted" hidden></span>
+      <span id="health-pill" class="pill pill-muted"><span class="dot"></span>Checking…</span>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+  <main id="view" class="view" tabindex="-1"></main>
+
+  <nav class="tabbar" aria-label="Main">
+    <a href="#/triage" data-route="triage">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 14h6l-1 7 8-11h-6l1-7z"/></svg>Triage</a>
+    <a href="#/incidents" data-route="incidents">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Incidents</a>
+    <a href="#/services" data-route="services">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7.8 7.8 10.6 16M16.2 7.8 13.4 16M8.5 6h7"/></svg>Services</a>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>

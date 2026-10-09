@@ -5,8 +5,11 @@
 Endpoints:
     GET  /health           is the service up, and can it reach the graph
     POST /triage           an alert in, ranked incidents + a briefing out
+    GET  /incidents        every incident, grouped into a root-cause family
     GET  /incidents/{id}   one incident in full
     GET  /services         every service, with its dependencies
+    GET  /budget           model spend against the cap
+    GET  /                 the demo UI (static files in dejavu/static)
 
 The route handlers are thin on purpose. All the logic lives in retrieve.py and
 agent.py, which are tested without HTTP; these functions only translate between
@@ -18,16 +21,20 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from dejavu.agent import ClaudeExplainer, OpenAIExplainer, TemplateExplainer, triage
-from dejavu.retrieve import Alert, get_incident
+from dejavu.budget import Budget, BudgetExceeded
+from dejavu.retrieve import Alert, get_incident, list_incidents
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 # The connection is opened once at startup and reused. Opening one per request
 # would add a round trip to every call and exhaust the connection pool under
@@ -99,8 +106,10 @@ class MatchOut(BaseModel):
     score: int
     why: str
     signature_match: bool
+    same_service: bool
     shared_tags: List[str]
     also_shares: List[str]
+    breakdown: Dict[str, int]
     resolution: Optional[str]
     fixed_by: Optional[str]
 
@@ -131,6 +140,31 @@ class IncidentOut(BaseModel):
     resolution: Optional[str]
     fixed_by: Optional[str]
     time_to_resolve_min: Optional[int]
+
+
+class IncidentListItem(IncidentOut):
+    family: str
+
+
+# Root-cause families, derived from tags. The data has no family field, so the
+# grouping is a rule: the first family whose tags an incident carries wins.
+# Order matters — INC-023 is tagged both `deploy` and `connection-pool`, and
+# the pool is what ran out, so connection-pool is checked first.
+FAMILIES = [
+    ("Connection pool", {"connection-pool"}),
+    ("Kafka consumer lag", {"kafka", "consumer-lag"}),
+    ("TLS and certificates", {"tls", "certificate"}),
+    ("Memory and OOM", {"memory", "oom"}),
+    ("Cache and Redis", {"cache", "redis"}),
+    ("Deploy and config", {"deploy", "config", "feature-flag"}),
+]
+
+
+def family_of(tags: List[str]) -> str:
+    for name, markers in FAMILIES:
+        if markers & set(tags):
+            return name
+    return "Other"
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +220,12 @@ def build_explainer(choice: str):
 def post_triage(request: TriageRequest):
     graph = require_graph()
     alert = Alert(service=request.service, error=request.error, tags=request.tags)
-    result = triage(graph, alert, build_explainer(request.explainer), limit=request.limit)
+    try:
+        result = triage(graph, alert, build_explainer(request.explainer), limit=request.limit)
+    except BudgetExceeded as exc:
+        # 429: the request is fine, but this deployment has spent its model
+        # budget. The template explainer still works, and the message says so.
+        raise HTTPException(status_code=429, detail=str(exc))
 
     return TriageResponse(
         service=alert.service,
@@ -202,8 +241,10 @@ def post_triage(request: TriageRequest):
                 score=m.score,
                 why=m.why(),
                 signature_match=m.signature_match,
+                same_service=m.same_service,
                 shared_tags=sorted(m.shared_tags),
                 also_shares=sorted(m.shared_dependencies) if not m.same_service else [],
+                breakdown=m.breakdown(),
                 resolution=m.resolution,
                 fixed_by=m.fixed_by,
             )
@@ -218,6 +259,16 @@ def post_triage(request: TriageRequest):
             for p in result["peers"]
         ],
     )
+
+
+@app.get("/incidents", response_model=List[IncidentListItem])
+def get_all_incidents():
+    incidents = list_incidents(require_graph())
+    for incident in incidents:
+        if incident.get("time_to_resolve_min") is not None:
+            incident["time_to_resolve_min"] = int(incident["time_to_resolve_min"])
+        incident["family"] = family_of(incident["tags"])
+    return [IncidentListItem(**i) for i in incidents]
 
 
 @app.get("/incidents/{incident_id}", response_model=IncidentOut)
@@ -255,3 +306,24 @@ def list_services():
         }
         for row in result.result_set
     ]
+
+
+@app.get("/budget")
+def get_budget():
+    """What the model explainers have spent against the hard cap. Read from
+    the same ledger the cap is enforced from, so the two cannot disagree."""
+    budget = Budget()
+    try:
+        spent = budget.spent
+    except BudgetExceeded as exc:
+        return {"limit_usd": budget.limit_usd, "spent_usd": None, "detail": str(exc)}
+    return {
+        "limit_usd": budget.limit_usd,
+        "spent_usd": spent,
+        "remaining_usd": budget.remaining,
+        "calls": len(budget.entries()),
+    }
+
+
+# Mounted last, so every API route above takes precedence over a file path.
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="ui")

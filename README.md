@@ -107,14 +107,26 @@ Numbers with fewer than six digits are left alone, because the `1` in
 .venv\Scripts\python.exe -m uvicorn dejavu.api:app --reload
 ```
 
-Interactive docs at `http://127.0.0.1:8000/docs`.
+The demo UI is at `http://127.0.0.1:8000/` and interactive API docs at
+`http://127.0.0.1:8000/docs`.
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /health` | Up, connected, and how many incidents are loaded |
 | `POST /triage` | An alert in; ranked matches, a briefing, and exposed peers out |
+| `GET /incidents` | Every incident, newest first, with its root-cause family |
 | `GET /incidents/{id}` | One incident in full |
 | `GET /services` | Every service with its dependencies and incident count |
+| `GET /budget` | Model spend so far against the hard cap |
+
+Each match in a `/triage` response carries a `breakdown` of its score by
+weight (signature, tags, same service, dependency), which always sums to the
+score, so a client can show the arithmetic rather than a bare number.
+
+The data has no family field, so `/incidents` derives one from tags: the first
+of six families whose tags an incident carries. The order is deliberate —
+INC-023 is tagged `deploy` and `connection-pool`, and it belongs with the pool
+incidents.
 
 ```
 curl -X POST http://127.0.0.1:8000/triage -H "Content-Type: application/json" ^
@@ -132,7 +144,7 @@ FalkorDB Cloud instance is a dependency being down, not a bug in this service.
 .venv\Scripts\python.exe -m pytest
 ```
 
-61 tests. The integration tests run against the live graph; they skip only if
+81 tests. The integration tests run against the live graph; they skip only if
 no database is reachable. The Claude request is verified with a fake client, so
 the suite needs no API key and costs nothing to run.
 
@@ -176,5 +188,7 @@ to spot.
   explainer is written and unit-tested against a fake client, but has never
   been run against the real API
 - **Phase 4a** HTTP API — done
-- **Phase 4b** demo UI — not started
+- **Phase 4b** demo UI — done. Plain HTML, CSS and JS in `dejavu/static/`,
+  served by the API itself with no build step: triage with demo presets,
+  incident catalog and detail, and the service dependency map
 - **Phase 4c** evaluation harness — not started

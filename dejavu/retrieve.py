@@ -83,6 +83,16 @@ class Match:
             reasons.append("same service")
         return "; ".join(reasons) or "no evidence"
 
+    def breakdown(self) -> dict:
+        """The score split into the weights that produced it, so a UI can
+        show the arithmetic instead of a bare number. Always sums to score."""
+        return {
+            "signature": SIGNATURE_WEIGHT if self.signature_match else 0,
+            "tags": TAG_WEIGHT * len(self.shared_tags),
+            "same_service": SAME_SERVICE_WEIGHT if self.same_service else 0,
+            "dependency": SHARED_DEPENDENCY_WEIGHT if self.shared_dependencies else 0,
+        }
+
     def also_shares(self) -> str:
         """Dependencies in common with the alerting service — context, not a
         reason. Empty when it is the same service, where it says nothing."""
@@ -171,6 +181,21 @@ RETURN i.id AS id, i.title AS title, i.severity AS severity,
 """
 
 
+ALL_INCIDENTS_QUERY = """
+MATCH (i:Incident)-[:AFFECTED]->(svc:Service)
+OPTIONAL MATCH (i)-[:HAS_SIGNATURE]->(sig:ErrorSignature)
+OPTIONAL MATCH (i)-[:RESOLVED_BY]->(res:Resolution)
+OPTIONAL MATCH (i)-[:TAGGED]->(t:Tag)
+RETURN i.id AS id, i.title AS title, i.severity AS severity,
+       i.occurred_at AS occurred_at, i.summary AS summary,
+       svc.name AS service, sig.normalized AS error_signature,
+       collect(DISTINCT t.name) AS tags,
+       res.action AS resolution, res.fixed_by AS fixed_by,
+       res.time_to_resolve_min AS time_to_resolve_min
+ORDER BY occurred_at DESC
+"""
+
+
 def _rows(result) -> List[dict]:
     """Turn a FalkorDB result into a list of dicts keyed by column name."""
     columns = [c[1] if isinstance(c, (list, tuple)) else c for c in result.header]
@@ -186,6 +211,14 @@ def get_incident(graph, incident_id: str) -> Optional[dict]:
     row = rows[0]
     row["tags"] = sorted(row["tags"] or [])
     return row
+
+
+def list_incidents(graph) -> List[dict]:
+    """Every incident, newest first, in the same shape as get_incident."""
+    rows = _rows(graph.ro_query(ALL_INCIDENTS_QUERY))
+    for row in rows:
+        row["tags"] = sorted(row["tags"] or [])
+    return rows
 
 
 def find_similar(graph, alert: Alert, limit: int = 5) -> List[Match]:

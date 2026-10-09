@@ -121,3 +121,38 @@ def test_openai_explainer_without_a_server_key_is_a_400(client, monkeypatch):
     response = client.post("/triage", json={**POOL_ALERT, "explainer": "openai"})
     assert response.status_code == 400
     assert "OPENAI_API_KEY" in response.json()["detail"]
+
+
+def test_triage_breakdown_adds_up_to_the_score(client):
+    for match in client.post("/triage", json=POOL_ALERT).json()["matches"]:
+        assert sum(match["breakdown"].values()) == match["score"]
+
+
+def test_list_incidents_puts_every_incident_in_one_of_six_families(client):
+    incidents = client.get("/incidents").json()
+    assert len(incidents) == 27
+    families = {}
+    for incident in incidents:
+        families.setdefault(incident["family"], []).append(incident["id"])
+    assert "Other" not in families
+    assert len(families) == 6
+    # INC-023 carries both `deploy` and `connection-pool`; the pool is what ran out.
+    assert "INC-023" in families["Connection pool"]
+    assert len(families["Connection pool"]) == 6
+
+
+def test_list_incidents_is_newest_first(client):
+    dates = [i["occurred_at"] for i in client.get("/incidents").json()]
+    assert dates == sorted(dates, reverse=True)
+
+
+def test_budget_reports_the_cap(client):
+    body = client.get("/budget").json()
+    assert body["limit_usd"] > 0
+    assert "spent_usd" in body
+
+
+def test_root_serves_the_ui(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Déjà Vu" in response.text
