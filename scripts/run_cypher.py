@@ -15,24 +15,33 @@ from falkordb import FalkorDB
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def load_env():
-    """Read .env into os.environ.
+def load_env(env_file: Path = None) -> bool:
+    """Read .env into os.environ if the file exists. Returns whether it did.
 
-    We parse it by hand instead of using python-dotenv so there is one less
-    dependency to install. Blank lines and #-comments are skipped.
+    A missing .env is NOT an error. Locally the file is how you configure
+    things; on a deployed host there is no file — .env is gitignored — and the
+    platform sets real environment variables instead. An earlier version of
+    this exited when the file was absent, which made the deployed service
+    report "No .env file found" while its env vars were sitting right there,
+    unread.
+
+    Real environment variables take precedence over the file, which is the
+    usual precedence and means a deployed value can never be shadowed by a
+    stray committed default.
+
+    Parsed by hand rather than with python-dotenv so there is one less
+    dependency. Blank lines and #-comments are skipped.
     """
-    env_file = ROOT / ".env"
+    env_file = env_file or ROOT / ".env"
     if not env_file.exists():
-        sys.exit(
-            "No .env file found.\n"
-            "Copy .env.example to .env and fill in your FalkorDB Cloud details."
-        )
-    for line in env_file.read_text().splitlines():
+        return False
+    for line in env_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ[key.strip()] = value.strip()
+        os.environ.setdefault(key.strip(), value.strip())
+    return True
 
 
 def connect():
@@ -63,10 +72,13 @@ def connect():
             if not os.environ.get(k)
         ]
         if missing:
+            # Names both places on purpose: locally this means .env, on a
+            # deployed host it means the platform's environment variables.
             sys.exit(
-                "Missing connection details in .env.\n"
-                "Either set FALKOR_URL to the connection string from the dashboard, "
-                f"or fill in: {', '.join(missing)}"
+                "No FalkorDB connection configured.\n"
+                "Set FALKOR_URL to the connection string from the dashboard "
+                f"(or set {', '.join(missing)}) — in .env locally, or as "
+                "environment variables on your host."
             )
         db = FalkorDB(
             host=os.environ["FALKOR_HOST"],

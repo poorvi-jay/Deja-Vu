@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/health", "destination": "https://REPLACE-ME.onrender.com/health" },
+    { "source": "/budget", "destination": "https://REPLACE-ME.onrender.com/budget" },
+    { "source": "/triage", "destination": "https://REPLACE-ME.onrender.com/triage" },
+    { "source": "/services", "destination": "https://REPLACE-ME.onrender.com/services" },
+    { "source": "/incidents", "destination": "https://REPLACE-ME.onrender.com/incidents" },
+    { "source": "/incidents/:id", "destination": "https://REPLACE-ME.onrender.com/incidents/:id" },
+    { "source": "/docs", "destination": "https://REPLACE-ME.onrender.com/docs" },
+    { "source": "/openapi.json", "destination": "https://REPLACE-ME.onrender.com/openapi.json" }
+  ]
+}
