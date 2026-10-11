@@ -1,9 +1,9 @@
 """Tests for the agent loop.
 
-The ClaudeExplainer tests use a fake client, so the request it builds is
+The OpenAIExplainer tests use a fake client, so the request it builds is
 verified without an API key and without spending money. What they cannot check
-is how Claude actually writes — that needs a real key and a human reading the
-output.
+is how the model actually writes — that needs a real key and a human reading
+the output.
 """
 
 import sys
@@ -16,7 +16,6 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from dejavu.agent import (  # noqa: E402
     SYSTEM_PROMPT,
-    ClaudeExplainer,
     OpenAIExplainer,
     TemplateExplainer,
     build_evidence,
@@ -127,17 +126,6 @@ def test_template_flags_exposed_but_unaffected_peers(alert, peers):
     assert "never affected" in out
 
 
-# --------------------------------------------------------------------------
-# ClaudeExplainer — fake client, no key, no network
-# --------------------------------------------------------------------------
-
-
-class FakeBlock:
-    def __init__(self, text):
-        self.type = "text"
-        self.text = text
-
-
 class FakeUsage:
     def __init__(self, input_tokens=900, output_tokens=180):
         self.input_tokens = input_tokens
@@ -145,46 +133,6 @@ class FakeUsage:
         # OpenAI names them differently for the same thing.
         self.prompt_tokens = input_tokens
         self.completion_tokens = output_tokens
-
-
-class FakeResponse:
-    def __init__(self, text, stop_reason="end_turn"):
-        self.content = [FakeBlock(text)]
-        self.stop_reason = stop_reason
-        self.usage = FakeUsage()
-
-
-class FakeMessages:
-    def __init__(self, response):
-        self.response = response
-        self.calls = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        return self.response
-
-
-class FakeClient:
-    def __init__(self, text="Try raising the pool size, as in INC-001.", stop_reason="end_turn"):
-        self.messages = FakeMessages(FakeResponse(text, stop_reason))
-
-
-def test_claude_explainer_sends_the_evidence_and_system_prompt(alert, peers, budget):
-    client = FakeClient()
-    out = ClaudeExplainer(client=client, budget=budget).explain(alert, [make_match()], peers)
-
-    assert out == "Try raising the pool size, as in INC-001."
-    call = client.messages.calls[0]
-    assert call["model"] == "claude-haiku-4-5"  # cheap by default: $1.25 cap
-    assert call["system"] == SYSTEM_PROMPT
-    # The evidence, and nothing but the evidence, is what the model sees.
-    assert call["messages"][0]["content"] == build_evidence(alert, [make_match()], peers)
-
-
-def test_claude_explainer_handles_a_refusal(alert, peers, budget):
-    client = FakeClient(text="", stop_reason="refusal")
-    out = ClaudeExplainer(client=client, budget=budget).explain(alert, [make_match()], peers)
-    assert "declined" in out
 
 
 def test_system_prompt_forbids_inventing_facts():
@@ -239,19 +187,6 @@ def test_openai_explainer_handles_empty_content(alert, peers, budget):
     assert OpenAIExplainer(client=client, budget=budget).explain(alert, [make_match()], peers) == ""
 
 
-def test_both_model_explainers_get_identical_input(alert, peers, budget):
-    """The provider is a detail. Swapping it must not change what the model is
-    told — same system prompt, same evidence, same facts."""
-    openai_client, claude_client = FakeOpenAIClient(), FakeClient()
-    OpenAIExplainer(client=openai_client, budget=budget).explain(alert, [make_match()], peers)
-    ClaudeExplainer(client=claude_client, budget=budget).explain(alert, [make_match()], peers)
-
-    openai_call = openai_client.chat.completions.calls[0]
-    claude_call = claude_client.messages.calls[0]
-    assert openai_call["messages"][0]["content"] == claude_call["system"]
-    assert openai_call["messages"][1]["content"] == claude_call["messages"][0]["content"]
-
-
 # --------------------------------------------------------------------------
 # The loop, end to end against the real graph
 # --------------------------------------------------------------------------
@@ -298,7 +233,9 @@ def test_model_calls_are_recorded_against_the_budget(alert, peers, budget):
     assert budget.spent > 0
 
     first = budget.spent
-    ClaudeExplainer(client=FakeClient(), budget=budget).explain(alert, [make_match()], peers)
+    OpenAIExplainer(client=FakeOpenAIClient(), budget=budget).explain(
+        alert, [make_match()], peers
+    )
     assert budget.spent > first
 
 

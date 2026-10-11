@@ -4,8 +4,8 @@
         --error "HikariPool-1 - Connection is not available, request timed out after 30000ms." ^
         --tags connection-pool,timeout,database
 
-Add --explainer claude to have Claude write the briefing (needs
-ANTHROPIC_API_KEY in .env). The default template explainer needs no key.
+Add --explainer openai to have a model write the briefing (needs
+OPENAI_API_KEY in .env). The default template explainer needs no key.
 """
 
 import argparse
@@ -17,7 +17,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from dejavu.agent import (  # noqa: E402
-    ClaudeExplainer,
     OpenAIExplainer,
     TemplateExplainer,
     triage,
@@ -34,13 +33,13 @@ def parse_args():
     p.add_argument("--limit", type=int, default=5)
     p.add_argument(
         "--explainer",
-        choices=["template", "openai", "claude"],
+        choices=["template", "openai"],
         default="template",
-        help="template needs no API key; openai and claude write a better briefing",
+        help="template needs no API key; openai writes a better briefing",
     )
     p.add_argument(
         "--model",
-        help="override the model id for the openai or claude explainer",
+        help="override the model id for the openai explainer",
     )
     p.add_argument("--show-evidence", action="store_true",
                    help="print the exact text the explainer was given")
@@ -51,8 +50,6 @@ EXPLAINERS = {
     # choice: (class, env var holding the key, where to get one, pip package)
     "openai": (OpenAIExplainer, "OPENAI_API_KEY",
                "https://platform.openai.com/api-keys", "openai"),
-    "claude": (ClaudeExplainer, "ANTHROPIC_API_KEY",
-               "https://console.anthropic.com", "anthropic"),
 }
 
 
@@ -76,7 +73,7 @@ def build_explainer(choice: str, model: str | None):
 
 def main():
     args = parse_args()
-    load_env()  # must run before build_explainer, which reads ANTHROPIC_API_KEY
+    load_env()  # must run before build_explainer, which reads OPENAI_API_KEY
 
     alert = Alert(
         service=args.service,

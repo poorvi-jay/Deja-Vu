@@ -34,10 +34,15 @@ DEFAULT_LIMIT_USD = 1.25
 PRICES = {
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o": (2.50, 10.00),
-    "claude-opus-5": (5.00, 25.00),
-    "claude-sonnet-5": (2.00, 10.00),
-    "claude-haiku-4-5": (1.00, 5.00),
 }
+
+# What an unlisted model is charged at. Deliberately a constant rather than
+# "the most expensive row in PRICES": derived from the table, the safety of
+# the guard would quietly depend on which models happen to be listed, and
+# deleting the priciest row would make unknown models look cheaper. This is
+# set well above any frontier model's list price so an unknown model can
+# never under-report.
+FALLBACK_PRICE = (15.00, 75.00)
 
 
 class BudgetExceeded(RuntimeError):
@@ -54,14 +59,12 @@ class Entry:
 
 
 def price_for(model: str) -> tuple:
-    """Price for a model, falling back to the most expensive entry.
+    """Price for a model, falling back to a deliberately high rate.
 
     An unpriced model must never cost zero: that would let an unknown model
     spend the whole budget while the ledger reported nothing.
     """
-    if model in PRICES:
-        return PRICES[model]
-    return max(PRICES.values(), key=lambda p: p[1])
+    return PRICES.get(model, FALLBACK_PRICE)
 
 
 def cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:

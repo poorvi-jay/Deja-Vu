@@ -29,13 +29,17 @@ def test_cost_matches_the_published_rate():
     assert cost_usd("gpt-4o-mini", 0, 1_000_000) == pytest.approx(0.60)
 
 
-def test_unknown_model_is_costed_at_the_most_expensive_rate():
+def test_unknown_model_is_costed_at_the_fallback_rate():
     """An unpriced model must not cost zero, or it could spend the whole
-    budget while the ledger reported nothing."""
-    assert price_for("some-model-released-next-year") == max(
-        price_for("claude-opus-5"), price_for("gpt-4o")
-    )
+    budget while the ledger reported nothing. The fallback is a constant, not
+    the priciest row in PRICES: derived from the table, deleting that row
+    would quietly make unknown models look cheaper."""
+    from dejavu.budget import FALLBACK_PRICE, PRICES
+
+    assert price_for("some-model-released-next-year") == FALLBACK_PRICE
     assert cost_usd("some-model-released-next-year", 1_000, 1_000) > 0
+    # And it is above everything we do price, in both directions.
+    assert all(FALLBACK_PRICE[0] > p[0] and FALLBACK_PRICE[1] > p[1] for p in PRICES.values())
 
 
 def test_a_fresh_budget_has_spent_nothing(budget):

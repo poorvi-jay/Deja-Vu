@@ -48,7 +48,6 @@ const PRESETS = [
 const EXPLAINERS = [
   { id: "template", name: "Template", note: "free · no model" },
   { id: "openai", name: "OpenAI", note: "gpt-4o-mini" },
-  { id: "claude", name: "Claude", note: "haiku 4.5" },
 ];
 
 // The same rules as dejavu/normalize.py, used here only to highlight which

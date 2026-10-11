@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from dejavu.agent import ClaudeExplainer, OpenAIExplainer, TemplateExplainer, triage
+from dejavu.agent import OpenAIExplainer, TemplateExplainer, triage
 from dejavu.budget import Budget, BudgetExceeded
 from dejavu.retrieve import Alert, get_incident, list_incidents
 
@@ -120,7 +120,7 @@ class TriageRequest(BaseModel):
     )
     tags: List[str] = Field(default_factory=list, examples=[["connection-pool", "timeout"]])
     limit: int = Field(5, ge=1, le=50)
-    explainer: Literal["template", "openai", "claude"] = "template"
+    explainer: Literal["template", "openai"] = "template"
 
 
 class MatchOut(BaseModel):
@@ -223,10 +223,7 @@ def health():
 def build_explainer(choice: str):
     if choice == "template":
         return TemplateExplainer()
-    cls, env_var = {
-        "openai": (OpenAIExplainer, "OPENAI_API_KEY"),
-        "claude": (ClaudeExplainer, "ANTHROPIC_API_KEY"),
-    }[choice]
+    cls, env_var = {"openai": (OpenAIExplainer, "OPENAI_API_KEY")}[choice]
     if not os.environ.get(env_var):
         # 400, not 500: the caller asked for something this deployment cannot
         # do, and the message says exactly what is missing.

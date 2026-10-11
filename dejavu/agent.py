@@ -17,7 +17,7 @@ Two explainers implement the same interface:
 
   TemplateExplainer - deterministic, no API key, no network. Runs in tests and
                       in a demo with no internet.
-  ClaudeExplainer   - calls Claude to write the summary an on-call engineer
+  OpenAIExplainer   - calls a model to write the summary an on-call engineer
                       reads at 3am.
 """
 
@@ -148,43 +148,15 @@ on. Do not imply the shared dependency caused anything.
 - No preamble, no restating the alert. Under 200 words. Plain prose."""
 
 
-class ClaudeExplainer:
-    """Asks Claude to write the briefing from the retrieved evidence."""
-
-    def __init__(self, client=None, model: str = "claude-haiku-4-5", budget: Budget = None):
-        if client is None:
-            import anthropic  # imported lazily so the package is optional
-
-            client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
-        self.client = client
-        self.model = model
-        self.budget = budget if budget is not None else Budget()
-
-    def explain(self, alert: Alert, matches: List[Match], peers: list) -> str:
-        prompt = build_evidence(alert, matches, peers)
-        self.budget.check(self.model, SYSTEM_PROMPT + prompt, MAX_OUTPUT_TOKENS)
-
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=MAX_OUTPUT_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        usage = getattr(response, "usage", None)
-        if usage is not None:
-            self.budget.record(self.model, usage.input_tokens, usage.output_tokens)
-        if response.stop_reason == "refusal":
-            return "The model declined to answer. Falling back to the retrieved facts above."
-        return "".join(b.text for b in response.content if b.type == "text")
-
-
 class OpenAIExplainer:
     """Asks an OpenAI chat model to write the briefing.
 
-    Interchangeable with ClaudeExplainer: same SYSTEM_PROMPT, same evidence,
-    same return type. Only the SDK call differs. That is the whole reason
-    `Explainer` is a protocol rather than a single class — the model is a
-    detail, and swapping it should not touch retrieval or the loop.
+    It implements `Explainer` and nothing else does except the template, which
+    is the point: the model is a detail behind a protocol, so adding or
+    swapping a provider touches this class and never retrieval or the loop.
+    (A second, Anthropic-backed explainer existed here and was removed — it
+    was never called against the real API, and an untested path is worse than
+    an absent one.)
     """
 
     # gpt-4o-mini by default, not gpt-4o. This project has a $1.25 total cap,
