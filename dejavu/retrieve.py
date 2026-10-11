@@ -141,7 +141,14 @@ WITH cand, csvc, sig_match, shared_tags, shared_deps, same_service,
 // a Redis hot-key incident surface against a connection-pool alert. Two tags
 // is the bar, which still admits a differently-worded incident like INC-019
 // that shares three.
-WHERE sig_match > 0 OR same_service > 0 OR size(shared_tags) >= $min_shared_tags
+//
+// Same service does not qualify a candidate either, for the same reason as
+// the dependency. The eval caught this: an unrecognised crash on
+// payment-gateway returned that service's two TLS incidents, because sharing
+// a service was enough on its own. "What else broke here" is a different
+// question from "have we seen THIS", and this endpoint answers the second.
+// It still boosts the ranking of candidates that qualified some other way.
+WHERE sig_match > 0 OR size(shared_tags) >= $min_shared_tags
 
 OPTIONAL MATCH (cand)-[:RESOLVED_BY]->(res:Resolution)
 RETURN cand.id AS id, cand.title AS title, cand.severity AS severity,

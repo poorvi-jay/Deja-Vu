@@ -1,5 +1,7 @@
 # Déjà Vu
 
+**Live: https://deja-vu-hfbi.onrender.com**
+
 A graph-backed incident memory. When a service pages, Déjà Vu answers two
 questions from an incident history stored in FalkorDB:
 
@@ -64,21 +66,25 @@ exactly this reason — two incidents sharing a tag are two hops apart.
 
 `dejavu/retrieve.py` weighs three independent kinds of evidence:
 
-| Evidence | Weight | Hops |
-|---|---|---|
-| Identical error signature | 10 | 1, via `:ErrorSignature` |
-| Each shared tag | 3 | 2, via `:Tag` |
-| Same service | 4 | 1, via `:AFFECTED` |
-| Shared dependency | 2 | 3, via `:Dependency` |
+| Evidence | Weight | Hops | Role |
+|---|---|---|---|
+| Identical error signature | 10 | 1, via `:ErrorSignature` | qualifies |
+| Each shared tag | 3 | 2, via `:Tag` | qualifies at 2+ |
+| Same service | 4 | 1, via `:AFFECTED` | boost only |
+| Shared dependency | 2 | 3, via `:Dependency` | boost only |
 
-To qualify at all, a candidate needs an identical signature, the same service,
-or **at least two** shared tags.
+To qualify at all, a candidate needs an identical signature or **at least
+two** shared tags. Same service and shared dependency adjust the ranking of
+what already qualified; neither admits a candidate on its own.
 
-A shared dependency only breaks ties. It never qualifies a candidate on its
-own, or an unrecognised error would drag in every unrelated incident from
-every service using the same library. Nor does one shared tag: generic tags
-like `timeout` sit on a fifth of the incidents, so a single overlap let a
-Redis hot-key incident surface against a connection-pool alert.
+That rule was tightened twice, both times because something unrelated came
+back. One shared tag used to be enough, and generic tags like `timeout` sit on
+a fifth of the incidents — a Redis hot-key incident surfaced against a
+connection-pool alert. Then the evaluation harness caught the other half: an
+unrecognised crash on `payment-gateway` returned that service's two TLS
+incidents, because sharing a service was enough. *What else broke here* is a
+different question from *have we seen this*, and this endpoint answers the
+second.
 
 For the same reason, a shared dependency is never given as a *reason* a match
 was returned. The query counts any library two services have in common, so
@@ -144,9 +150,9 @@ FalkorDB Cloud instance is a dependency being down, not a bug in this service.
 .venv\Scripts\python.exe -m pytest
 ```
 
-81 tests. The integration tests run against the live graph; they skip only if
-no database is reachable. The Claude request is verified with a fake client, so
-the suite needs no API key and costs nothing to run.
+101 tests. The integration tests run against the live graph; they skip only
+if no database is reachable. Both model explainers are verified with fake
+clients, so the suite needs no API key and costs nothing to run.
 
 ## Triage
 
@@ -167,7 +173,7 @@ Three explainers implement the same interface:
 
 - `TemplateExplainer` (default) — deterministic, no API key, no network.
 - `OpenAIExplainer` (`--explainer openai`) — needs `OPENAI_API_KEY` in `.env`.
-  Defaults to `gpt-4o`; override with `--model`.
+  Defaults to `gpt-4o-mini`; override with `--model`.
 - `ClaudeExplainer` (`--explainer claude`) — needs `ANTHROPIC_API_KEY` in
   `.env` and `pip install anthropic`.
 
@@ -179,16 +185,91 @@ model is told is not.
 briefing that is not in that text is fabricated, which makes that failure easy
 to spot.
 
+## Does the ranking actually work?
+
+```
+.venv\Scripts\python.exe scripts\evaluate.py
+```
+
+13 held-out alerts, written as new occurrences of the six known root-cause
+families — different timeouts, extra clauses real tools emit, and several with
+no exact signature match so only tags can reach the family.
+
+| Metric | Score | Question it answers |
+|---|---|---|
+| hit@1 | **100%** | Is the first result from the right family? |
+| precision@3 | **100%** | Is the whole shortlist useful, not just the winner? |
+| MRR | **1.00** | Is the right answer ever buried down the list? |
+| negatives | **2/2** | Does an unrecognised alert return *nothing*? |
+
+The negatives carry as much weight as the rest. A system that always answers
+is not retrieving, it is guessing — and one of them caught a real bug, which
+is how the same-service rule above got tightened. `precision@3` rose from 94%
+to 100% as a result: the fix removed noise from the shortlists too.
+
+No model is called, so a run is free, repeatable, and unaffected by changes in
+the prose. `tests/test_evaluate.py` asserts these thresholds, so altering a
+scoring weight tells you immediately whether you improved retrieval or broke
+it.
+
+Honest limitation: the alerts are hand-written from the same families the data
+describes, so this measures whether retrieval ranks the right family — not
+whether it generalises to phrasing nobody anticipated. Alerts drawn from real
+production logs would be a stronger test.
+
+## Model spend
+
+Every model call is costed from the API's own reported token usage, written to
+`.spend.json`, and **refused** once a cap is reached — `dejavu/budget.py`,
+exposed at `GET /budget`. A briefing costs about **$0.000245** on
+`gpt-4o-mini`. An unknown model is billed at the most expensive rate in the
+table rather than zero, so a pricing gap fails in the direction that stops you
+early.
+
+The ledger is a file, so the cap survives the process exiting. On an ephemeral
+host it resets on restart, which makes `DEJAVU_BUDGET_USD` a per-boot cap
+there rather than a lifetime one.
+
+## Deployment
+
+One Render web service serves both the API and the UI — the static files are
+mounted at `/`, so there is no second origin and no CORS to configure.
+
+| Setting | Value |
+|---|---|
+| Build | `pip install -r requirements.txt` |
+| Start | `uvicorn dejavu.api:app --host 0.0.0.0 --port $PORT` |
+| Health check | `/health` |
+| Env | `FALKOR_URL`, `FALKOR_GRAPH`, `OPENAI_API_KEY`, `DEJAVU_BUDGET_USD`, `PYTHON_VERSION` |
+
+Two things keep the demo alive on free tiers, both of which had already
+bitten:
+
+- **Self-seeding.** If the API starts and finds an empty graph, it loads
+  `data/incidents.json` itself. A free FalkorDB instance can be paused or
+  removed between demos; the service heals rather than serving zero results.
+  Disable with `DEJAVU_SEED_ON_START=0`.
+- **Keepalive.** `.github/workflows/keepalive.yml` pings `/health` every ten
+  minutes, which keeps the Render instance awake *and* counts as graph
+  activity, since `/health` runs a real query. It fails the workflow run on a
+  degraded graph, so the breakage surfaces before a visitor finds it.
+
+`dejavu/static/vercel.json` optionally fronts the page with Vercel's CDN,
+proxying the API paths back to Render so everything stays same-origin.
+
 ## Status
 
 - **Phase 0** environment — done
 - **Phase 1** schema and data, 27 incidents across 6 root-cause families — done
 - **Phase 2** retrieval, scoring, at-risk services, CLI — done
-- **Phase 3** agent loop — done with the template explainer; the Claude
-  explainer is written and unit-tested against a fake client, but has never
-  been run against the real API
+- **Phase 3** agent loop — done. The OpenAI explainer has been run against
+  the real API ($0.000245 per briefing); the Claude explainer is written and
+  unit-tested against a fake client but never called for real
 - **Phase 4a** HTTP API — done
 - **Phase 4b** demo UI — done. Plain HTML, CSS and JS in `dejavu/static/`,
   served by the API itself with no build step: triage with demo presets,
   incident catalog and detail, and the service dependency map
-- **Phase 4c** evaluation harness — not started
+- **Phase 4c** evaluation harness — done
+- **Phase 5** deployed on Render, with a self-seeding graph and a keepalive
+  — done
+- **Phase 6** demo video — recording is the last step

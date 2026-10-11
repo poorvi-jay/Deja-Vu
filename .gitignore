@@ -5,3 +5,6 @@ __pycache__/
 
 # Model spend ledger - local accounting, not source
 .spend.json
+
+# Local demo notes - not published
+DEMO.md

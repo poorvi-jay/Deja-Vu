@@ -1,0 +1,130 @@
+{
+  "_comment": [
+    "Held-out alerts for measuring RETRIEVAL, not prose. No model is called, so",
+    "running this costs nothing and can be repeated freely.",
+    "",
+    "Each alert is a NEW occurrence written to resemble a known root-cause",
+    "family without copying any stored incident's wording: timeouts differ,",
+    "some carry extra clauses real tools emit, and several deliberately have no",
+    "exact signature match so only tags can find them.",
+    "",
+    "Honest limitation: these were hand-written from the same six families the",
+    "data describes, so this measures whether retrieval ranks the right family,",
+    "not whether it generalises to phrasing nobody anticipated. Alerts drawn",
+    "from real production logs would be a stronger test."
+  ],
+  "families": {
+    "connection-pool": ["INC-001", "INC-004", "INC-011", "INC-019", "INC-023", "INC-024"],
+    "memory": ["INC-003", "INC-009", "INC-016", "INC-025"],
+    "cache": ["INC-005", "INC-012", "INC-017", "INC-026"],
+    "tls": ["INC-002", "INC-008", "INC-015", "INC-022"],
+    "kafka": ["INC-006", "INC-010", "INC-014", "INC-020", "INC-027"],
+    "deploy": ["INC-007", "INC-013", "INC-018", "INC-021", "INC-023"]
+  },
+  "alerts": [
+    {
+      "name": "pool exhaustion, unseen service, different timeout",
+      "service": "refund-service",
+      "error": "HikariPool-1 - Connection is not available, request timed out after 45000ms.",
+      "tags": ["connection-pool", "timeout"],
+      "expect_family": "connection-pool",
+      "note": "normalisation must reduce 45000ms to Nms for the signature to match"
+    },
+    {
+      "name": "pool failure after failover, no signature overlap with the common one",
+      "service": "order-service",
+      "error": "Connection marked as broken because of SQLSTATE(08006)",
+      "tags": ["connection-pool", "database", "failover"],
+      "expect_family": "connection-pool"
+    },
+    {
+      "name": "celery worker OOM",
+      "service": "notification-worker",
+      "error": "OOMKilled: container exceeded memory limit",
+      "tags": ["memory", "oom"],
+      "expect_family": "memory"
+    },
+    {
+      "name": "OOM phrased as a kernel message - tags only",
+      "service": "search-api",
+      "error": "worker killed: memory cgroup limit of 2147483648 bytes exceeded",
+      "tags": ["memory", "oom"],
+      "expect_family": "memory",
+      "note": "no stored signature resembles this; only tags can reach the family"
+    },
+    {
+      "name": "redis restart, cold cache",
+      "service": "user-auth",
+      "error": "LOADING Redis is loading the dataset in memory",
+      "tags": ["cache", "redis", "thundering-herd"],
+      "expect_family": "cache"
+    },
+    {
+      "name": "redis command timeout, seconds not millis",
+      "service": "inventory-service",
+      "error": "RedisCommandTimeoutException: Command timed out after 5 s",
+      "tags": ["cache", "redis", "timeout"],
+      "expect_family": "cache"
+    },
+    {
+      "name": "expired cert with the trailing clause Go actually prints",
+      "service": "api-gateway",
+      "error": "x509: certificate has expired or is not yet valid: current time 2026-10-11T02:00:00Z is after 2026-10-01T23:59:59Z",
+      "tags": ["tls", "certificate", "expiry"],
+      "expect_family": "tls",
+      "note": "the extra clause defeats exact signature matching - the known limitation"
+    },
+    {
+      "name": "untrusted CA on an outbound call",
+      "service": "payment-gateway",
+      "error": "x509: certificate signed by unknown authority",
+      "tags": ["tls", "certificate"],
+      "expect_family": "tls"
+    },
+    {
+      "name": "consumer group rebalancing continuously",
+      "service": "order-service",
+      "error": "CommitFailedException: Commit cannot be completed since the group has already rebalanced",
+      "tags": ["kafka", "rebalance"],
+      "expect_family": "kafka"
+    },
+    {
+      "name": "lag alert with a concrete figure",
+      "service": "notification-worker",
+      "error": "Consumer group notification-worker lag exceeded 1500000 messages",
+      "tags": ["kafka", "consumer-lag"],
+      "expect_family": "kafka",
+      "note": "1500000 is normalised to N; the stored signature has no number at all"
+    },
+    {
+      "name": "bad deploy, token validation broken",
+      "service": "user-auth",
+      "error": "JsonWebTokenError: jwt issuer invalid",
+      "tags": ["deploy", "config", "auth"],
+      "expect_family": "deploy"
+    },
+    {
+      "name": "deploy pointed at a missing index",
+      "service": "search-api",
+      "error": "index_not_found_exception",
+      "tags": ["deploy", "config", "elasticsearch"],
+      "expect_family": "deploy"
+    }
+  ],
+  "negatives": [
+    {
+      "name": "genuinely novel failure, no tags",
+      "service": "refund-service",
+      "error": "kernel panic - not syncing: attempted to kill init",
+      "tags": [],
+      "note": "nothing should come back; a guess here would be worse than silence"
+    },
+    {
+      "name": "unseen failure with one generic tag",
+      "service": "payment-gateway",
+      "error": "panic: integer divide by zero in settlement batch",
+      "tags": ["timeout"],
+      "note": "one generic tag must not qualify anything - the MIN_SHARED_TAGS rule"
+    }
+  ]
+}

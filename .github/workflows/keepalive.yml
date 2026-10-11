@@ -1,0 +1,47 @@
+name: keepalive
+
+# Two things sleep and have each cost us a working session:
+#   - the free Render instance spins down after ~15 minutes idle (~50s wake)
+#   - the free FalkorDB Cloud instance pauses after a few days idle, and has
+#     twice been removed entirely
+#
+# Hitting /health solves both at once, because /health does not just check the
+# socket — it runs `MATCH (i:Incident) RETURN count(i)`, so each ping is real
+# graph activity, not just an HTTP touch.
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub's scheduler is best-effort and can run late
+    # under load, so 10 minutes gives headroom against Render's 15-minute
+    # idle timeout.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health and require a connected graph
+        run: |
+          set -euo pipefail
+          URL="https://deja-vu-hfbi.onrender.com/health"
+
+          # Up to 3 tries: a cold Render instance can take ~50s to wake, which
+          # is longer than a default curl timeout.
+          for attempt in 1 2 3; do
+            body=$(curl -sS --max-time 90 "$URL" || true)
+            echo "attempt $attempt: $body"
+            if [ -n "$body" ]; then break; fi
+            sleep 15
+          done
+
+          # Fail the run on a degraded graph. A silent keepalive that keeps
+          # pinging a broken service is worse than none: the point is to find
+          # out BEFORE a judge does.
+          echo "$body" | grep -q '"status":"ok"' || {
+            echo "::error::health check is not ok — the graph is probably paused or gone"
+            exit 1
+          }
+          echo "$body" | grep -q '"incidents":27' || {
+            echo "::warning::graph is connected but does not hold 27 incidents"
+          }

@@ -39,7 +39,31 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 # The connection is opened once at startup and reused. Opening one per request
 # would add a round trip to every call and exhaust the connection pool under
 # any real load.
-state: dict = {"graph": None, "error": None}
+state: dict = {"graph": None, "error": None, "seeded": False}
+
+# Set DEJAVU_SEED_ON_START=0 to turn the self-seeding off.
+SEED_ON_START = os.environ.get("DEJAVU_SEED_ON_START", "1") != "0"
+
+
+def seed_if_empty(graph) -> bool:
+    """Load the incident data when the graph has none. Returns whether it did.
+
+    A free-tier FalkorDB instance can be recycled or recreated between demos,
+    and an empty graph answers every query with nothing while looking healthy.
+    Seeding is safe to attempt on every boot because the loader is built from
+    MERGEs: with data already present it writes nothing.
+    """
+    count = graph.ro_query("MATCH (i:Incident) RETURN count(i)").result_set[0][0]
+    if int(count):
+        return False
+    from dejavu.loader import load_all
+
+    result = load_all(graph)
+    print(
+        f"[startup] graph was empty — seeded {result['incidents']} incidents, "
+        f"{result['nodes_created']} nodes"
+    )
+    return True
 
 
 @asynccontextmanager
@@ -50,11 +74,13 @@ async def lifespan(app: FastAPI):
         load_env()
         state["graph"] = connect()
         state["graph"].ro_query("RETURN 1")
+        if SEED_ON_START:
+            state["seeded"] = seed_if_empty(state["graph"])
     except BaseException as exc:
         # Startup must not crash the process: /health should come up and
         # report the problem, which is far easier to debug on a deployed box
         # than a container that exits before it logs anything. load_env calls
-        # sys.exit on a missing .env, hence BaseException.
+        # sys.exit when configuration is missing, hence BaseException.
         state["error"] = str(exc) or exc.__class__.__name__
     yield
 
