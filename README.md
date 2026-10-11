@@ -15,6 +15,42 @@ The second question is the reason this is a graph and not a text search. That
 two services share a connection-pool library is an *edge*; it appears in the
 wording of no incident, so no amount of searching the text can find it.
 
+## Submission
+
+**Graph Hacks — Track: Agent Memory and Coordination**
+
+| | |
+|---|---|
+| Live deployment | https://deja-vu-hfbi.onrender.com |
+| Graph database | FalkorDB Cloud (free tier) |
+| Data | synthetic — 27 incidents written for this project, no real or private data |
+
+### Why the graph is load-bearing
+
+Take FalkorDB out and the product does not degrade, it loses an answer it
+cannot produce any other way. "Which other services could hit this?" is
+answered by walking `Incident → Service → Dependency ← Service`. That
+`refund-service` shares HikariCP 5.0.1 with three services that have each hit
+pool exhaustion is written in no incident's text — nobody records "by the way,
+refund-service uses the same connection pool." It exists only as a path. A
+vector store over the same incident text can rank similar *wording*; it cannot
+traverse a relationship that was never written down.
+
+The ranking itself is also a traversal, not a text scan: shared tags are
+`(a)-[:TAGGED]->(:Tag)<-[:TAGGED]-(b)`, two hops, which is how INC-019 is
+found despite its error text (`SQLSTATE(08006)`) sharing no words with the
+alert.
+
+### AI assistance disclosure
+
+This project was built with **Claude Code** (Anthropic) as a coding assistant,
+used throughout: the schema was designed interactively, and the retrieval
+scoring, agent loop, HTTP API, budget cap, loader, evaluation harness and
+tests were written with its help and reviewed by me. The scoring weights,
+qualification thresholds and schema decisions are documented in this README
+and in comments at each decision point, including the two cases where the
+evaluation harness disproved an earlier rule.
+
 ## Setup
 
 ```
@@ -183,6 +219,100 @@ worse than an absent one.
 `--show-evidence` prints the exact text the explainer was given. Anything in a
 briefing that is not in that text is fabricated, which makes that failure easy
 to spot.
+
+## The queries the product depends on
+
+Three queries do the work. All values arrive as `$parameters` — never pasted
+into the query text — so an apostrophe in a summary cannot break the Cypher
+and the database reuses one plan.
+
+### 1. Ranked retrieval — `dejavu/retrieve.py`
+
+Each `OPTIONAL MATCH` adds a column of evidence without dropping candidates
+that fail it. A plain `MATCH` would discard every incident lacking, say, a
+shared tag — exactly the ones the signature match exists to find.
+
+```cypher
+MATCH (cand:Incident)-[:AFFECTED]->(csvc:Service)
+
+OPTIONAL MATCH (cand)-[:HAS_SIGNATURE]->(sig:ErrorSignature {normalized: $signature})
+WITH cand, csvc, CASE WHEN sig IS NULL THEN 0 ELSE 1 END AS sig_match
+
+OPTIONAL MATCH (cand)-[:TAGGED]->(t:Tag)
+WHERE t.name IN $tags
+WITH cand, csvc, sig_match, collect(DISTINCT t.name) AS shared_tags
+
+OPTIONAL MATCH (csvc)-[:DEPENDS_ON]->(d:Dependency)<-[:DEPENDS_ON]-(:Service {name: $service})
+WITH cand, csvc, sig_match, shared_tags, collect(DISTINCT d.name) AS shared_deps
+
+WITH cand, csvc, sig_match, shared_tags, shared_deps,
+     CASE WHEN csvc.name = $service THEN 1 ELSE 0 END AS same_service
+
+WITH cand, csvc, sig_match, shared_tags, shared_deps, same_service,
+     sig_match * $signature_weight
+     + size(shared_tags) * $tag_weight
+     + same_service * $same_service_weight
+     + CASE WHEN size(shared_deps) > 0 THEN $shared_dependency_weight ELSE 0 END
+     AS score
+WHERE sig_match > 0 OR size(shared_tags) >= $min_shared_tags
+
+OPTIONAL MATCH (cand)-[:RESOLVED_BY]->(res:Resolution)
+RETURN cand.id AS id, cand.title AS title, cand.severity AS severity,
+       cand.occurred_at AS occurred_at, csvc.name AS service,
+       score, sig_match, shared_tags, shared_deps, same_service,
+       res.action AS resolution, res.fixed_by AS fixed_by
+ORDER BY score DESC, cand.occurred_at DESC
+LIMIT $limit
+```
+
+### 2. Who else is exposed — the query no text search can replace
+
+A three-hop traversal out of the alerting service, through a shared
+dependency, into its peers. `past_incidents` separates peers that have hit
+this before (they hold the fix) from peers that are exposed and have not been
+bitten yet.
+
+```cypher
+MATCH (:Service {name: $service})-[:DEPENDS_ON]->(d:Dependency)<-[:DEPENDS_ON]-(peer:Service)
+WHERE peer.name <> $service
+OPTIONAL MATCH (peer)<-[:AFFECTED]-(i:Incident)-[:TAGGED]->(t:Tag)
+WHERE t.name IN $tags
+WITH peer, collect(DISTINCT d.name) AS via, count(DISTINCT i) AS past_incidents
+RETURN peer.name AS service, via, past_incidents
+ORDER BY past_incidents DESC, service
+```
+
+### 3. Idempotent load — `dejavu/loader.py`
+
+Every write is a `MERGE`, so loading twice changes nothing. The braces hold
+identity only; everything else goes in `ON CREATE SET` so a reload never
+overwrites what is already stored.
+
+```cypher
+MATCH (svc:Service {name: $service})
+MERGE (inc:Incident {id: $id})
+  ON CREATE SET
+    inc.title       = $title,
+    inc.occurred_at = $occurred_at,
+    inc.severity    = $severity,
+    inc.summary     = $summary
+MERGE (sig:ErrorSignature {normalized: $error_signature})
+MERGE (inc)-[:AFFECTED]->(svc)
+MERGE (inc)-[:HAS_SIGNATURE]->(sig)
+MERGE (res:Resolution {id: $resolution_id})
+  ON CREATE SET
+    res.action              = $resolution.action,
+    res.fixed_by            = $resolution.fixed_by,
+    res.time_to_resolve_min = $resolution.time_to_resolve_min
+MERGE (inc)-[:RESOLVED_BY]->(res)
+WITH inc
+UNWIND $tags AS tag_name
+MERGE (t:Tag {name: tag_name})
+MERGE (inc)-[:TAGGED]->(t)
+```
+
+`UNWIND` goes last deliberately: unwinding an empty list yields zero rows, so
+any clause after it would silently not run.
 
 ## Does the ranking actually work?
 
