@@ -5,8 +5,14 @@
       "team": "payments",
       "language": "java",
       "dependencies": [
-        {"name": "HikariCP", "version": "5.0.1"},
-        {"name": "lettuce", "version": "6.2.6"}
+        {
+          "name": "HikariCP",
+          "version": "5.0.1"
+        },
+        {
+          "name": "lettuce",
+          "version": "6.2.6"
+        }
       ]
     },
     {
@@ -14,8 +20,14 @@
       "team": "orders",
       "language": "java",
       "dependencies": [
-        {"name": "HikariCP", "version": "5.0.1"},
-        {"name": "kafka-clients", "version": "3.4.0"}
+        {
+          "name": "HikariCP",
+          "version": "5.0.1"
+        },
+        {
+          "name": "kafka-clients",
+          "version": "3.4.0"
+        }
       ]
     },
     {
@@ -23,8 +35,14 @@
       "team": "fulfillment",
       "language": "java",
       "dependencies": [
-        {"name": "HikariCP", "version": "5.0.1"},
-        {"name": "lettuce", "version": "6.2.6"}
+        {
+          "name": "HikariCP",
+          "version": "5.0.1"
+        },
+        {
+          "name": "lettuce",
+          "version": "6.2.6"
+        }
       ]
     },
     {
@@ -32,7 +50,10 @@
       "team": "payments",
       "language": "java",
       "dependencies": [
-        {"name": "HikariCP", "version": "5.0.1"}
+        {
+          "name": "HikariCP",
+          "version": "5.0.1"
+        }
       ]
     },
     {
@@ -40,8 +61,14 @@
       "team": "payments",
       "language": "go",
       "dependencies": [
-        {"name": "pgx", "version": "5.4.3"},
-        {"name": "cert-manager", "version": "1.13.2"}
+        {
+          "name": "pgx",
+          "version": "5.4.3"
+        },
+        {
+          "name": "cert-manager",
+          "version": "1.13.2"
+        }
       ]
     },
     {
@@ -49,9 +76,18 @@
       "team": "growth",
       "language": "python",
       "dependencies": [
-        {"name": "celery", "version": "5.3.4"},
-        {"name": "kafka-python", "version": "2.0.2"},
-        {"name": "redis-py", "version": "5.0.1"}
+        {
+          "name": "celery",
+          "version": "5.3.4"
+        },
+        {
+          "name": "kafka-python",
+          "version": "2.0.2"
+        },
+        {
+          "name": "redis-py",
+          "version": "5.0.1"
+        }
       ]
     },
     {
@@ -59,8 +95,14 @@
       "team": "discovery",
       "language": "python",
       "dependencies": [
-        {"name": "elasticsearch-py", "version": "8.11.0"},
-        {"name": "redis-py", "version": "5.0.1"}
+        {
+          "name": "elasticsearch-py",
+          "version": "8.11.0"
+        },
+        {
+          "name": "redis-py",
+          "version": "5.0.1"
+        }
       ]
     },
     {
@@ -68,8 +110,14 @@
       "team": "identity",
       "language": "node",
       "dependencies": [
-        {"name": "ioredis", "version": "5.3.2"},
-        {"name": "jsonwebtoken", "version": "9.0.2"}
+        {
+          "name": "ioredis",
+          "version": "5.3.2"
+        },
+        {
+          "name": "jsonwebtoken",
+          "version": "9.0.2"
+        }
       ]
     },
     {
@@ -77,9 +125,49 @@
       "team": "platform",
       "language": "envoy",
       "dependencies": [
-        {"name": "envoy", "version": "1.28.0"},
-        {"name": "cert-manager", "version": "1.13.2"}
+        {
+          "name": "envoy",
+          "version": "1.28.0"
+        },
+        {
+          "name": "cert-manager",
+          "version": "1.13.2"
+        }
       ]
+    }
+  ],
+  "engineers": [
+    {
+      "handle": "dev.a",
+      "team": "discovery"
+    },
+    {
+      "handle": "jo.w",
+      "team": "payments"
+    },
+    {
+      "handle": "lena.k",
+      "team": "fulfillment"
+    },
+    {
+      "handle": "marcus.o",
+      "team": "orders"
+    },
+    {
+      "handle": "nina.p",
+      "team": "identity"
+    },
+    {
+      "handle": "omar.h",
+      "team": "platform"
+    },
+    {
+      "handle": "priya.n",
+      "team": "payments"
+    },
+    {
+      "handle": "sam.r",
+      "team": "growth"
     }
   ],
   "incidents": [
@@ -91,7 +179,11 @@
       "service": "checkout-api",
       "summary": "Checkout requests timed out for 38 minutes. HikariCP pool was exhausted; connections were being held by a slow analytics query on the shared primary.",
       "error_signature": "HikariPool-1 - Connection is not available, request timed out after Nms",
-      "tags": ["connection-pool", "timeout", "database"],
+      "tags": [
+        "connection-pool",
+        "timeout",
+        "database"
+      ],
       "resolution": {
         "action": "Raised HikariCP maximumPoolSize 10 -> 30 and moved the analytics query to the read replica.",
         "fixed_by": "priya.n",
@@ -106,7 +198,11 @@
       "service": "api-gateway",
       "summary": "Every external request failed the TLS handshake for 47 minutes. The wildcard certificate expired; the cert-manager renewal had been failing silently for three weeks.",
       "error_signature": "x509: certificate has expired or is not yet valid",
-      "tags": ["tls", "certificate", "expiry"],
+      "tags": [
+        "tls",
+        "certificate",
+        "expiry"
+      ],
       "resolution": {
         "action": "Manually renewed the certificate; added alerts on cert-manager Certificate NotReady and on any cert expiring within 14 days.",
         "fixed_by": "omar.h",
@@ -121,7 +217,11 @@
       "service": "notification-worker",
       "summary": "Celery workers were OOMKilled roughly every six hours. The default prefetch pulled thousands of queued messages into each worker's memory at once.",
       "error_signature": "OOMKilled: container exceeded memory limit",
-      "tags": ["memory", "oom", "celery"],
+      "tags": [
+        "memory",
+        "oom",
+        "celery"
+      ],
       "resolution": {
         "action": "Set worker_prefetch_multiplier=1 and max_tasks_per_child=500.",
         "fixed_by": "sam.r",
@@ -136,7 +236,11 @@
       "service": "order-service",
       "summary": "Order creation returned 500s for 52 minutes. A new reporting endpoint held database connections open inside a long transaction and exhausted the HikariCP pool.",
       "error_signature": "HikariPool-1 - Connection is not available, request timed out after Nms",
-      "tags": ["connection-pool", "timeout", "database"],
+      "tags": [
+        "connection-pool",
+        "timeout",
+        "database"
+      ],
       "resolution": {
         "action": "Ran the report query in a read-only transaction with a 5s statement timeout; enabled leakDetectionThreshold=10000.",
         "fixed_by": "marcus.o",
@@ -151,7 +255,11 @@
       "service": "user-auth",
       "summary": "Logins failed for 14 minutes after a Redis restart. Every session lookup missed the cache at once and the resulting stampede overloaded the identity database.",
       "error_signature": "LOADING Redis is loading the dataset in memory",
-      "tags": ["cache", "redis", "thundering-herd"],
+      "tags": [
+        "cache",
+        "redis",
+        "thundering-herd"
+      ],
       "resolution": {
         "action": "Added request coalescing on cache miss so concurrent lookups for one key share a single DB query; added jitter to TTLs.",
         "fixed_by": "nina.p",
@@ -166,7 +274,11 @@
       "service": "order-service",
       "summary": "Consumer lag on order-events grew to two million messages. A slow downstream call inside the poll loop exceeded max.poll.interval.ms, so the group rebalanced continuously and made no progress.",
       "error_signature": "CommitFailedException: Commit cannot be completed since the group has already rebalanced",
-      "tags": ["kafka", "consumer-lag", "rebalance"],
+      "tags": [
+        "kafka",
+        "consumer-lag",
+        "rebalance"
+      ],
       "resolution": {
         "action": "Moved the downstream call off the poll thread; raised max.poll.interval.ms to 600000.",
         "fixed_by": "marcus.o",
@@ -181,7 +293,11 @@
       "service": "search-api",
       "summary": "Search returned no results for 18 minutes after a deploy. The release changed the configured index alias to one that did not exist.",
       "error_signature": "index_not_found_exception",
-      "tags": ["deploy", "config", "elasticsearch"],
+      "tags": [
+        "deploy",
+        "config",
+        "elasticsearch"
+      ],
       "resolution": {
         "action": "Rolled back; added a startup check that fails the pod if the configured index alias does not exist.",
         "fixed_by": "dev.a",
@@ -196,7 +312,11 @@
       "service": "payment-gateway",
       "summary": "All outbound calls to the card processor failed for 63 minutes. The processor rotated its intermediate CA and our pinned CA bundle was stale.",
       "error_signature": "x509: certificate signed by unknown authority",
-      "tags": ["tls", "certificate", "third-party"],
+      "tags": [
+        "tls",
+        "certificate",
+        "third-party"
+      ],
       "resolution": {
         "action": "Updated the CA bundle; replaced certificate pinning with the system trust store plus the processor's published bundle.",
         "fixed_by": "jo.w",
@@ -211,7 +331,11 @@
       "service": "search-api",
       "summary": "search-api pods restarted repeatedly during peak traffic. An unbounded in-process LRU of query results grew past the 2Gi memory limit.",
       "error_signature": "OOMKilled: container exceeded memory limit",
-      "tags": ["memory", "oom", "cache"],
+      "tags": [
+        "memory",
+        "oom",
+        "cache"
+      ],
       "resolution": {
         "action": "Capped the LRU at 10k entries and moved the result cache to Redis.",
         "fixed_by": "dev.a",
@@ -226,7 +350,11 @@
       "service": "notification-worker",
       "summary": "Notifications were delayed by up to 40 minutes. Messages were keyed by tenant id, so one large tenant's partition carried 70% of all traffic while other consumers sat idle.",
       "error_signature": "Consumer group lag exceeded threshold",
-      "tags": ["kafka", "consumer-lag", "partitioning"],
+      "tags": [
+        "kafka",
+        "consumer-lag",
+        "partitioning"
+      ],
       "resolution": {
         "action": "Re-keyed messages on tenant id plus user id and increased partitions from 12 to 48.",
         "fixed_by": "sam.r",
@@ -241,7 +369,11 @@
       "service": "inventory-service",
       "summary": "Stock reservation p99 latency rose to 8 seconds. A node drain halved the pod count, and the remaining pods' 10-connection HikariCP pools saturated.",
       "error_signature": "HikariPool-1 - Connection is not available, request timed out after Nms",
-      "tags": ["connection-pool", "latency", "database"],
+      "tags": [
+        "connection-pool",
+        "latency",
+        "database"
+      ],
       "resolution": {
         "action": "Restored the replica count; set HPA minReplicas=4 so a drain cannot drop capacity that far.",
         "fixed_by": "lena.k",
@@ -256,7 +388,12 @@
       "service": "inventory-service",
       "summary": "During a flash sale a single SKU's key took 40% of Redis CPU and stock reads timed out across the service.",
       "error_signature": "RedisCommandTimeoutException: Command timed out after Nms",
-      "tags": ["cache", "redis", "hot-key", "timeout"],
+      "tags": [
+        "cache",
+        "redis",
+        "hot-key",
+        "timeout"
+      ],
       "resolution": {
         "action": "Added a 1-second in-process cache in front of Redis for hot SKUs.",
         "fixed_by": "lena.k",
@@ -271,7 +408,11 @@
       "service": "checkout-api",
       "summary": "The new tax engine flag was set to 100% instead of 5%. Tax calculation failed for about 30% of orders, in regions the new engine did not yet support.",
       "error_signature": "TaxCalculationException: no rate for region",
-      "tags": ["feature-flag", "config", "5xx"],
+      "tags": [
+        "feature-flag",
+        "config",
+        "5xx"
+      ],
       "resolution": {
         "action": "Rolled the flag back to 0%; flag changes above 10% now need a second approver.",
         "fixed_by": "priya.n",
@@ -286,7 +427,11 @@
       "service": "order-service",
       "summary": "Each pod restart during a rolling deploy triggered a full consumer group rebalance, pausing all order-event processing for most of the 25-minute rollout.",
       "error_signature": "CommitFailedException: Commit cannot be completed since the group has already rebalanced",
-      "tags": ["kafka", "rebalance", "deploy"],
+      "tags": [
+        "kafka",
+        "rebalance",
+        "deploy"
+      ],
       "resolution": {
         "action": "Switched to the cooperative-sticky assignor and enabled static group membership.",
         "fixed_by": "marcus.o",
@@ -301,7 +446,12 @@
       "service": "api-gateway",
       "summary": "mTLS between the gateway and internal services failed after the internal CA certificate expired over the holiday break.",
       "error_signature": "x509: certificate has expired or is not yet valid",
-      "tags": ["tls", "certificate", "expiry", "mtls"],
+      "tags": [
+        "tls",
+        "certificate",
+        "expiry",
+        "mtls"
+      ],
       "resolution": {
         "action": "Reissued the internal CA with a two-year validity and added an expiry dashboard covering every CA.",
         "fixed_by": "omar.h",
@@ -316,7 +466,12 @@
       "service": "notification-worker",
       "summary": "Email rendering tasks leaked memory until workers were OOMKilled. A template cache was keyed on user id instead of template id, so it grew with every recipient.",
       "error_signature": "OOMKilled: container exceeded memory limit",
-      "tags": ["memory", "oom", "celery", "leak"],
+      "tags": [
+        "memory",
+        "oom",
+        "celery",
+        "leak"
+      ],
       "resolution": {
         "action": "Keyed the template cache on template id; set max_tasks_per_child=200 as a backstop.",
         "fixed_by": "sam.r",
@@ -331,7 +486,11 @@
       "service": "user-auth",
       "summary": "A bulk forced re-login issued every session with the same fixed TTL. They all expired together at midnight and the re-auth stampede exhausted identity database connections.",
       "error_signature": "identity-db: too many connections",
-      "tags": ["cache", "thundering-herd", "ttl"],
+      "tags": [
+        "cache",
+        "thundering-herd",
+        "ttl"
+      ],
       "resolution": {
         "action": "Added plus or minus 10% jitter to session TTLs.",
         "fixed_by": "nina.p",
@@ -346,7 +505,11 @@
       "service": "user-auth",
       "summary": "A deploy shipped with JWT_ISSUER unset. Every token failed issuer validation and all authenticated requests were rejected for 16 minutes.",
       "error_signature": "JsonWebTokenError: jwt issuer invalid",
-      "tags": ["deploy", "config", "auth"],
+      "tags": [
+        "deploy",
+        "config",
+        "auth"
+      ],
       "resolution": {
         "action": "Rolled back; made JWT_ISSUER required at boot so the service crashes instead of running with an empty value.",
         "fixed_by": "nina.p",
@@ -361,7 +524,12 @@
       "service": "checkout-api",
       "summary": "Checkout was fully down for 21 minutes after a Postgres failover. HikariCP kept handing out dead connections to the old primary, and every request waited out the full connection timeout.",
       "error_signature": "Connection marked as broken because of SQLSTATE(08006)",
-      "tags": ["connection-pool", "database", "failover", "timeout"],
+      "tags": [
+        "connection-pool",
+        "database",
+        "failover",
+        "timeout"
+      ],
       "resolution": {
         "action": "Lowered maxLifetime to 5 minutes and enabled keepaliveTime so dead connections are evicted quickly after a failover.",
         "fixed_by": "priya.n",
@@ -376,7 +544,11 @@
       "service": "notification-worker",
       "summary": "A malformed message crashed the consumer on every attempt. The offset never advanced, so the whole partition stalled behind it.",
       "error_signature": "JSONDecodeError: Expecting value: line 1 column 1",
-      "tags": ["kafka", "consumer-lag", "poison-message"],
+      "tags": [
+        "kafka",
+        "consumer-lag",
+        "poison-message"
+      ],
       "resolution": {
         "action": "Added a dead-letter topic; messages that fail three times are moved there and the consumer continues.",
         "fixed_by": "sam.r",
@@ -391,7 +563,11 @@
       "service": "api-gateway",
       "summary": "A typo in a route config change sent /v2/orders traffic to the inventory backend, which returned 404 for 25 minutes.",
       "error_signature": "upstream returned 404 for route",
-      "tags": ["deploy", "config", "routing"],
+      "tags": [
+        "deploy",
+        "config",
+        "routing"
+      ],
       "resolution": {
         "action": "Rolled back; added route contract tests to CI that assert each path reaches its intended backend.",
         "fixed_by": "omar.h",
@@ -406,7 +582,11 @@
       "service": "payment-gateway",
       "summary": "After a certificate renewal the webhook endpoint served the leaf certificate without its intermediate chain, and the processor rejected every callback.",
       "error_signature": "x509: certificate signed by unknown authority",
-      "tags": ["tls", "certificate", "chain"],
+      "tags": [
+        "tls",
+        "certificate",
+        "chain"
+      ],
       "resolution": {
         "action": "Stored the full chain in the TLS secret; added a certificate chain check to the deploy pipeline.",
         "fixed_by": "jo.w",
@@ -421,7 +601,11 @@
       "service": "inventory-service",
       "summary": "A release picked up a change to the shared config defaults that lowered HikariCP maximumPoolSize to 5, and inventory-service ran out of connections at normal load.",
       "error_signature": "HikariPool-1 - Connection is not available, request timed out after Nms",
-      "tags": ["deploy", "config", "connection-pool"],
+      "tags": [
+        "deploy",
+        "config",
+        "connection-pool"
+      ],
       "resolution": {
         "action": "Restored the pool size; each service now sets its pool size explicitly rather than inheriting the shared default.",
         "fixed_by": "lena.k",
@@ -436,7 +620,11 @@
       "service": "order-service",
       "summary": "The nightly import job and the order API shared one HikariCP pool. The import took every connection and API requests timed out for 44 minutes.",
       "error_signature": "HikariPool-1 - Connection is not available, request timed out after Nms",
-      "tags": ["connection-pool", "timeout", "batch-job"],
+      "tags": [
+        "connection-pool",
+        "timeout",
+        "batch-job"
+      ],
       "resolution": {
         "action": "Gave the import job its own pool capped at 5 connections, separate from the API pool.",
         "fixed_by": "marcus.o",
@@ -451,7 +639,11 @@
       "service": "search-api",
       "summary": "Large aggregation queries loaded entire Elasticsearch responses into memory and pods were OOMKilled.",
       "error_signature": "OOMKilled: container exceeded memory limit",
-      "tags": ["memory", "oom", "elasticsearch"],
+      "tags": [
+        "memory",
+        "oom",
+        "elasticsearch"
+      ],
       "resolution": {
         "action": "Switched to search_after pagination with 500-document pages.",
         "fixed_by": "dev.a",
@@ -466,7 +658,11 @@
       "service": "checkout-api",
       "summary": "Under memory pressure, Redis evicted cart keys under its allkeys-lru policy and customers reached checkout with empty carts.",
       "error_signature": "cart not found for session",
-      "tags": ["cache", "redis", "eviction"],
+      "tags": [
+        "cache",
+        "redis",
+        "eviction"
+      ],
       "resolution": {
         "action": "Moved carts to a dedicated Redis with the noeviction policy and double the memory.",
         "fixed_by": "priya.n",
@@ -481,7 +677,11 @@
       "service": "order-service",
       "summary": "After partitions were added to order-events, consumers had auto.offset.reset=earliest and reprocessed the new partitions from the beginning, building a large lag.",
       "error_signature": "Consumer group lag exceeded threshold",
-      "tags": ["kafka", "consumer-lag", "config"],
+      "tags": [
+        "kafka",
+        "consumer-lag",
+        "config"
+      ],
       "resolution": {
         "action": "Set auto.offset.reset=latest and added idempotency keys so reprocessing is harmless.",
         "fixed_by": "marcus.o",

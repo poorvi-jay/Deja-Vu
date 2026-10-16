@@ -30,7 +30,8 @@ def main():
         sys.exit(str(exc))
 
     print(
-        f"Loaded {result['services']} services, {result['incidents']} incidents.\n"
+        f"Loaded {result['services']} services, {result['engineers']} engineers, "
+        f"{result['incidents']} incidents.\n"
         f"nodes created: {result['nodes_created']}  "
         f"relationships created: {result['relationships_created']}"
     )

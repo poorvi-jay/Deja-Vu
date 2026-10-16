@@ -26,11 +26,28 @@ DATA_FILE = ROOT / "data" / "incidents.json"
 SERVICE_QUERY = """
 MERGE (svc:Service {name: $name})
   ON CREATE SET svc.team = $team, svc.language = $language
+MERGE (team:Team {name: $team})
+MERGE (svc)-[:OWNED_BY]->(team)
 WITH svc
 UNWIND $dependencies AS d
 MERGE (dep:Dependency {name: d.name, version: d.version})
 MERGE (svc)-[:DEPENDS_ON]->(dep)
 """
+# `team` is keyed on its name, which is all a team is here — there is no team
+# id, and two teams called "payments" would be one team. The property
+# svc.team stays alongside the node: both are written from the same field of
+# the same file, so they cannot drift, and the existing API responses keep
+# working. The node is what you traverse; the property is a convenience.
+
+ENGINEER_QUERY = """
+MERGE (eng:Engineer {handle: $handle})
+MERGE (team:Team {name: $team})
+MERGE (eng)-[:MEMBER_OF]->(team)
+"""
+# Keyed on handle. A person's team can change; their handle is who they are.
+# Putting team in the braces would create a second Engineer node the day
+# someone moves team, and then "who has fixed this before" would answer twice
+# for one person.
 # UNWIND turns a list into one row per item, so the two MERGEs after it run
 # once per dependency. Nothing follows it, which matters: UNWIND of an empty
 # list produces zero rows, and any clause after it would silently not run.
@@ -52,6 +69,8 @@ MERGE (res:Resolution {id: $resolution_id})
     res.fixed_by            = $resolution.fixed_by,
     res.time_to_resolve_min = $resolution.time_to_resolve_min
 MERGE (inc)-[:RESOLVED_BY]->(res)
+MERGE (eng:Engineer {handle: $resolution.fixed_by})
+MERGE (res)-[:FIXED_BY]->(eng)
 WITH inc
 UNWIND $tags AS tag_name
 MERGE (t:Tag {name: tag_name})
@@ -78,6 +97,7 @@ def validate(data: dict) -> None:
     Checking here turns that silent failure into a loud one.
     """
     service_names = {s["name"] for s in data["services"]}
+    engineers = {e["handle"] for e in data.get("engineers", [])}
     errors = []
     seen_ids = set()
 
@@ -90,6 +110,21 @@ def validate(data: dict) -> None:
         seen_ids.add(iid)
         if not inc.get("tags"):
             errors.append(f"{iid}: has no tags")
+        # A fixer with no engineers entry would still get an :Engineer node
+        # from INCIDENT_QUERY, but with no team — so it would be invisible to
+        # every routing query. Silent, and exactly the kind of hole that only
+        # shows up when an advisory routes to nobody.
+        if inc["resolution"]["fixed_by"] not in engineers:
+            errors.append(
+                f"{iid}: fixed_by '{inc['resolution']['fixed_by']}' has no engineers entry"
+            )
+
+    service_teams = {s["team"] for s in data["services"]}
+    for eng in data.get("engineers", []):
+        if eng["team"] not in service_teams:
+            errors.append(
+                f"engineer {eng['handle']}: team '{eng['team']}' owns no service"
+            )
 
     if errors:
         raise DataError("Data problems in incidents.json:\n  " + "\n  ".join(errors))
@@ -107,6 +142,15 @@ def load_all(graph, data: dict = None) -> dict:
         totals["nodes"] += result.nodes_created
         totals["relationships"] += result.relationships_created
 
+    # Engineers before incidents, so MEMBER_OF is in place before anything
+    # routes through it. INCIDENT_QUERY also MERGEs the engineer by handle;
+    # because the key is the same, that finds this node rather than making a
+    # second, teamless one.
+    for eng in data.get("engineers", []):
+        result = graph.query(ENGINEER_QUERY, params=eng)
+        totals["nodes"] += result.nodes_created
+        totals["relationships"] += result.relationships_created
+
     for inc in data["incidents"]:
         params = dict(
             inc,
@@ -121,6 +165,7 @@ def load_all(graph, data: dict = None) -> dict:
 
     return {
         "services": len(data["services"]),
+        "engineers": len(data.get("engineers", [])),
         "incidents": len(data["incidents"]),
         "nodes_created": int(totals["nodes"]),
         "relationships_created": int(totals["relationships"]),
