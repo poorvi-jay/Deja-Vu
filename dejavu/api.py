@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from dejavu.agent import OpenAIExplainer, TemplateExplainer, triage
 from dejavu.budget import Budget, BudgetExceeded
+from dejavu.families import family_of
 from dejavu.retrieve import Alert, get_incident, list_incidents
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -172,25 +173,6 @@ class IncidentListItem(IncidentOut):
     family: str
 
 
-# Root-cause families, derived from tags. The data has no family field, so the
-# grouping is a rule: the first family whose tags an incident carries wins.
-# Order matters — INC-023 is tagged both `deploy` and `connection-pool`, and
-# the pool is what ran out, so connection-pool is checked first.
-FAMILIES = [
-    ("Connection pool", {"connection-pool"}),
-    ("Kafka consumer lag", {"kafka", "consumer-lag"}),
-    ("TLS and certificates", {"tls", "certificate"}),
-    ("Memory and OOM", {"memory", "oom"}),
-    ("Cache and Redis", {"cache", "redis"}),
-    ("Deploy and config", {"deploy", "config", "feature-flag"}),
-]
-
-
-def family_of(tags: List[str]) -> str:
-    for name, markers in FAMILIES:
-        if markers & set(tags):
-            return name
-    return "Other"
 
 
 # ---------------------------------------------------------------------------
