@@ -156,3 +156,103 @@ def test_root_serves_the_ui(client):
     response = client.get("/")
     assert response.status_code == 200
     assert "Déjà Vu" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Advisories
+# ---------------------------------------------------------------------------
+
+CHECKOUT_POOL_ALERT = {
+    "service": "checkout-api",
+    "error": "HikariPool-1 - Connection is not available, request timed out after 30000ms.",
+    "tags": ["connection-pool", "timeout"],
+}
+
+
+@pytest.fixture
+def no_advisories(client):
+    """Advisories are written to the shared graph; clear them around each test
+    so one test's leftovers cannot make another pass for the wrong reason."""
+    from run_cypher import connect, load_env
+
+    load_env()
+    graph = connect()
+    graph.query("MATCH (a:Advisory) DETACH DELETE a")
+    yield
+    graph.query("MATCH (a:Advisory) DETACH DELETE a")
+
+
+def test_post_advisories_warns_the_exposed_peer(client, no_advisories):
+    body = client.post("/advisories", json=CHECKOUT_POOL_ALERT).json()
+    assert [a["service"] for a in body] == ["refund-service"]
+    assert body[0]["status"] == "open"
+    assert body[0]["via"] == ["HikariCP"]
+    assert body[0]["routed_to"] == "payments"
+    assert body[0]["because_of"]
+    assert body[0]["suggested_fix"]
+    assert "HikariCP" in body[0]["why"]
+
+
+def test_post_advisories_is_idempotent_over_http(client, no_advisories):
+    client.post("/advisories", json=CHECKOUT_POOL_ALERT)
+    client.post("/advisories", json=CHECKOUT_POOL_ALERT)
+
+    listed = client.get("/advisories").json()
+    assert len(listed) == 1
+    assert listed[0]["seen_count"] == 2
+
+
+def test_get_advisories_filters_by_status_and_team(client, no_advisories):
+    client.post("/advisories", json=CHECKOUT_POOL_ALERT)
+
+    assert len(client.get("/advisories?status=open").json()) == 1
+    assert client.get("/advisories?status=resolved").json() == []
+    assert len(client.get("/advisories?team=payments").json()) == 1
+    assert client.get("/advisories?team=platform").json() == []
+
+
+def test_patch_advisory_status(client, no_advisories):
+    advisory_id = client.post("/advisories", json=CHECKOUT_POOL_ALERT).json()[0]["id"]
+
+    body = client.patch(f"/advisories/{advisory_id}", json={"status": "acknowledged"}).json()
+    assert body["status"] == "acknowledged"
+    assert client.get("/advisories?status=acknowledged").json()[0]["id"] == advisory_id
+
+
+def test_resolved_advisory_reopens_through_the_api(client, no_advisories):
+    advisory_id = client.post("/advisories", json=CHECKOUT_POOL_ALERT).json()[0]["id"]
+    client.patch(f"/advisories/{advisory_id}", json={"status": "resolved"})
+
+    reopened = client.post("/advisories", json=CHECKOUT_POOL_ALERT).json()[0]
+    assert reopened["status"] == "open"
+    assert reopened["reopened_at"] is not None
+
+
+def test_dismissed_advisory_is_not_reopened_through_the_api(client, no_advisories):
+    advisory_id = client.post("/advisories", json=CHECKOUT_POOL_ALERT).json()[0]["id"]
+    client.patch(f"/advisories/{advisory_id}", json={"status": "dismissed"})
+
+    client.post("/advisories", json=CHECKOUT_POOL_ALERT)
+    listed = client.get("/advisories").json()
+    assert listed[0]["status"] == "dismissed"
+    assert listed[0]["seen_count"] == 2
+
+
+def test_patch_unknown_advisory_is_404(client, no_advisories):
+    response = client.patch("/advisories/no-such-advisory", json={"status": "resolved"})
+    assert response.status_code == 404
+
+
+def test_patch_rejects_an_invented_status(client, no_advisories):
+    advisory_id = client.post("/advisories", json=CHECKOUT_POOL_ALERT).json()[0]["id"]
+    response = client.patch(f"/advisories/{advisory_id}", json={"status": "sort-of-fixed"})
+    assert response.status_code == 422
+
+
+def test_an_alert_matching_nothing_raises_no_advisories(client, no_advisories):
+    body = client.post(
+        "/advisories",
+        json={"service": "refund-service", "error": "totally novel failure", "tags": []},
+    ).json()
+    assert body == []
+    assert client.get("/advisories").json() == []

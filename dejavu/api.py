@@ -9,6 +9,9 @@ Endpoints:
     GET  /incidents/{id}   one incident in full
     GET  /services         every service, with its dependencies
     GET  /budget           model spend against the cap
+    POST /advisories       raise advisories for peers exposed by an alert
+    GET  /advisories       what is outstanding, filterable by status and team
+    PATCH /advisories/{id} acknowledge, resolve or dismiss one
     GET  /                 the demo UI (static files in dejavu/static)
 
 The route handlers are thin on purpose. All the logic lives in retrieve.py and
@@ -30,10 +33,17 @@ from pydantic import BaseModel, Field
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from dejavu.advisory import list_advisories, raise_advisories, set_status
 from dejavu.agent import OpenAIExplainer, TemplateExplainer, triage
 from dejavu.budget import Budget, BudgetExceeded
 from dejavu.families import family_of
-from dejavu.retrieve import Alert, get_incident, list_incidents
+from dejavu.retrieve import (
+    Alert,
+    at_risk_services,
+    find_similar,
+    get_incident,
+    list_incidents,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -328,6 +338,106 @@ def get_budget():
         "remaining_usd": budget.remaining,
         "calls": len(budget.entries()),
     }
+
+
+# ---------------------------------------------------------------------------
+# Advisories
+# ---------------------------------------------------------------------------
+
+
+class AdvisoryOut(BaseModel):
+    id: str
+    status: str
+    family: str
+    service: str
+    via: List[str]
+    because_of: List[str]
+    why: str
+    suggested_fix: Optional[str]
+    ask: Optional[str]
+    routed_to: Optional[str]
+    seen_count: int
+    raised_at: Optional[str]
+    last_seen_at: Optional[str]
+    reopened_at: Optional[str]
+
+
+class RaiseRequest(BaseModel):
+    """The same shape as a triage request: an advisory is a side effect of
+    triaging an alert, not a thing anyone composes by hand."""
+
+    service: str = Field(..., examples=["checkout-api"])
+    error: str = Field(
+        ...,
+        examples=["HikariPool-1 - Connection is not available, request timed out after 30000ms."],
+    )
+    tags: List[str] = Field(default_factory=list, examples=[["connection-pool", "timeout"]])
+    limit: int = Field(5, ge=1, le=50)
+
+
+class StatusUpdate(BaseModel):
+    status: Literal["open", "acknowledged", "resolved", "dismissed"]
+
+
+def advisory_out(advisory) -> AdvisoryOut:
+    return AdvisoryOut(
+        id=advisory.id,
+        status=advisory.status,
+        family=advisory.family,
+        service=advisory.service,
+        via=advisory.via,
+        because_of=advisory.because_of,
+        why=advisory.why(),
+        suggested_fix=advisory.suggested_fix,
+        ask=advisory.ask,
+        routed_to=advisory.routed_to,
+        seen_count=advisory.seen_count,
+        raised_at=advisory.raised_at,
+        last_seen_at=advisory.last_seen_at,
+        reopened_at=advisory.reopened_at,
+    )
+
+
+@app.post("/advisories", response_model=List[AdvisoryOut])
+def post_advisories(request: RaiseRequest):
+    """Raise an advisory for every peer exposed by this alert.
+
+    Safe to call repeatedly: an advisory is keyed on (service, dependency,
+    family), so re-raising the same exposure updates one node rather than
+    adding another. Peers that have already had this family are skipped.
+    """
+    graph = require_graph()
+    alert = Alert(service=request.service, error=request.error, tags=request.tags)
+    matches = find_similar(graph, alert, limit=request.limit)
+    peers = at_risk_services(graph, alert)
+    return [advisory_out(a) for a in raise_advisories(graph, alert, matches, peers)]
+
+
+@app.get("/advisories", response_model=List[AdvisoryOut])
+def get_advisories(
+    status: Optional[Literal["open", "acknowledged", "resolved", "dismissed"]] = None,
+    team: Optional[str] = None,
+):
+    """What is outstanding. `team` answers "what is on my plate" — the whole
+    reason :Team is a node."""
+    return [
+        advisory_out(a)
+        for a in list_advisories(require_graph(), status=status, team=team)
+    ]
+
+
+@app.patch("/advisories/{advisory_id}", response_model=AdvisoryOut)
+def patch_advisory(advisory_id: str, update: StatusUpdate):
+    """Acknowledge, resolve or dismiss.
+
+    The distinction that matters is in the graph, not here: a resolved
+    advisory reopens if the family recurs, a dismissed one does not.
+    """
+    graph = require_graph()
+    if set_status(graph, advisory_id, update.status) is None:
+        raise HTTPException(status_code=404, detail=f"no advisory {advisory_id}")
+    found = [a for a in list_advisories(graph) if a.id == advisory_id]
+    return advisory_out(found[0])
 
 
 # Mounted last, so every API route above takes precedence over a file path.
