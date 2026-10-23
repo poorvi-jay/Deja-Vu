@@ -90,7 +90,14 @@ the three peers sharing HikariCP.
 (:Incident)-[:AFFECTED]->(:Service)-[:DEPENDS_ON]->(:Dependency)
 (:Incident)-[:HAS_SIGNATURE]->(:ErrorSignature)
 (:Incident)-[:TAGGED]->(:Tag)
-(:Incident)-[:RESOLVED_BY]->(:Resolution)
+(:Incident)-[:RESOLVED_BY]->(:Resolution)-[:FIXED_BY]->(:Engineer)-[:MEMBER_OF]->(:Team)
+(:Service)-[:OWNED_BY]->(:Team)
+(:Advisory)-[:WARNS]->(:Service)
+(:Advisory)-[:VIA]->(:Dependency)
+(:Advisory)-[:BECAUSE_OF]->(:Incident)
+(:Advisory)-[:SUGGESTS]->(:Resolution)
+(:Advisory)-[:ROUTED_TO]->(:Team)
+(:Advisory)-[:SUGGESTED_ASK]->(:Engineer)
 ```
 
 The design rule behind it: **you can walk to a node, you cannot walk to a
@@ -186,7 +193,7 @@ FalkorDB Cloud instance is a dependency being down, not a bug in this service.
 .venv\Scripts\python.exe -m pytest
 ```
 
-101 tests. The integration tests run against the live graph; they skip only
+137 tests. The integration tests run against the live graph; they skip only
 if no database is reachable. The model explainer is verified with a fake
 client, so the suite needs no API key and costs nothing to run.
 
@@ -314,6 +321,110 @@ MERGE (inc)-[:TAGGED]->(t)
 `UNWIND` goes last deliberately: unwinding an empty list yields zero rows, so
 any clause after it would silently not run.
 
+## Coordination
+
+Retrieval answers "have we seen this before". Coordination answers what comes
+next: who owns the exposed service, who has actually fixed this kind of
+failure, and has anyone been told.
+
+`team` and `fixed_by` used to be properties, so neither was reachable. They are
+nodes now, for the same reason tags are: **you can walk to a node, you cannot
+walk to a property.** `(:Engineer)` is keyed on handle, not handle+team —
+people change teams, and a key that includes team would produce a second node
+for one person the day they move.
+
+That makes one query possible that was not before:
+
+```cypher
+MATCH (:Tag {name: $family})<-[:TAGGED]-(i:Incident)
+      -[:RESOLVED_BY]->(:Resolution)-[:FIXED_BY]->(eng:Engineer)-[:MEMBER_OF]->(t:Team)
+RETURN eng.handle, t.name, count(DISTINCT i) AS fixes, collect(DISTINCT i.id)
+ORDER BY fixes DESC
+```
+
+For Kafka failures that answers `marcus.o` in **orders** — and `search-api`,
+which is owned by **discovery**, is the service exposed to them. Routing names
+both: the team is accountable and always exists, the expert may be three teams
+away. Routing only to an individual breaks the week they are on leave;
+routing only to a team throws away the thing the graph uniquely knows.
+
+### Advisories
+
+An advisory says "this has not happened to you yet, and it probably will". Its
+identity is **(service, family)** — deliberately not the dependency, because
+two implicated dependencies are one exposure with two reasons.
+
+Because identity is a key, deduplication is a consequence of `MERGE` rather
+than a check anyone maintains. Raise the same exposure three times and you get
+one node with `seen_count: 3`.
+
+```cypher
+MERGE (a:Advisory {id: $id})
+  ON CREATE SET a.status = $open, a.raised_at = $now, a.seen_count = 1
+  ON MATCH SET  a.seen_count   = coalesce(a.seen_count, 1) + 1,
+                a.last_seen_at = $now,
+                a.reopened_at  = CASE WHEN a.status = $resolved THEN $now ELSE a.reopened_at END,
+                a.status       = CASE WHEN a.status = $resolved THEN $open ELSE a.status END
+```
+
+**Resolved reopens, dismissed does not.** Resolved means "we fixed it", so a
+recurrence is news. Dismissed means a human judged it inapplicable, and
+re-nagging them is how a tool gets muted — but `seen_count` still climbs, so
+the decision can be revisited with evidence. `reopened_at` is set *before*
+`status` because it reads the old value; a test resolves and re-raises an
+advisory rather than trusting that.
+
+Two rules decide who gets warned, both learned by getting them wrong first:
+
+- **The dependency must be implicated** — common to *every* service that has
+  had this family. Without it, a cache alert warned a peer "you share
+  HikariCP", a connection-pool library irrelevant to caches. Conservative by
+  design: if a family's incidents share no dependency, nobody is warned.
+- **A peer that has already had this family is not warned.** This first used
+  `at_risk_services`, which counts any overlapping tag — so an incident
+  sharing only `timeout` marked a peer as experienced in pool failures.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /advisories` | Raise one per exposed peer. Idempotent. |
+| `GET /advisories?status=&team=` | What is outstanding; `team` is "what is on my plate". |
+| `PATCH /advisories/{id}` | acknowledge, resolve or dismiss |
+
+Set `DEJAVU_WRITE_TOKEN` to require an `X-Write-Token` header on the two write
+endpoints. Unset — the default — leaves them open, which is what the tests and
+local development use.
+
+### Is it right?
+
+```
+.venv\Scripts\python.exe scripts\evaluate.py
+```
+
+Advisories are checked against an **independent oracle**: who should be warned
+is recomputed in plain Python from `data/incidents.json`, by a different method
+than the Cypher under test. A query asserted against itself proves nothing.
+
+| Check | Result |
+|---|---|
+| Agreement with the oracle | **14/14** cases |
+| Idempotent | re-raising everything leaves the population unchanged |
+| Duplicates | none |
+
+The oracle earned its place immediately: it caught both of the rules above
+being wrong, plus two duplicate bugs — `EXPOSED_QUERY` grouping by
+`(peer, dependency)` so a peer exposed through two dependencies came back
+twice, and `LIST_QUERY` grouping by `res.action` so an advisory that had
+collected a second suggested fix came back as two rows.
+
+Honest note on the data: the coordination feature fired in only one of
+fourteen eval cases at first, because almost nothing in the data qualified. I
+added the shared infrastructure the incident summaries already describe — a
+shared Postgres primary and one Kafka cluster — plus `billing-worker`, a
+service with no incident history. Four cases fire now, across two families.
+The modelling is defensible (shared infrastructure causes correlated failure
+more than client libraries do) but the richer result came from better data, not
+better code.
+
 ## Does the ranking actually work?
 
 ```
@@ -401,3 +512,6 @@ proxying the API paths back to Render so everything stays same-origin.
 - **Phase 5** deployed on Render, with a self-seeding graph and a keepalive
   — done
 - **Phase 6** demo video — recording is the last step
+- **Coordination layer** — `:Team`, `:Engineer` and `:Advisory`, expertise
+  routing, family-keyed dedupe, status transitions, an independently checked
+  evaluation, and an advisories page in the UI — done

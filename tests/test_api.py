@@ -262,3 +262,22 @@ def test_an_alert_matching_nothing_raises_no_advisories(client, no_advisories):
     ).json()
     assert body == []
     assert client.get("/advisories").json() == []
+
+
+def test_writes_are_open_when_no_token_is_configured(client, no_advisories):
+    """Tests and local dev stay key-free; the guard only bites once the env
+    var is set."""
+    assert client.post("/advisories", json=CHECKOUT_POOL_ALERT).status_code == 200
+
+
+def test_writes_require_the_token_when_one_is_configured(no_advisories, monkeypatch):
+    """Reads stay open either way — only POST and PATCH are guarded."""
+    import dejavu.api as api_module
+
+    monkeypatch.setattr(api_module, "WRITE_TOKEN", "s3cret")
+    with TestClient(app) as guarded:
+        assert guarded.get("/advisories").status_code == 200
+        assert guarded.post("/advisories", json=CHECKOUT_POOL_ALERT).status_code == 401
+        assert guarded.post(
+            "/advisories", json=CHECKOUT_POOL_ALERT, headers={"X-Write-Token": "s3cret"}
+        ).status_code == 200

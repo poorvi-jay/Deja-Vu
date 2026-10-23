@@ -786,9 +786,79 @@ async function route() {
   if (current === "incidents" && id) await renderIncident(decodeURIComponent(id));
   else if (current === "incidents") await renderIncidents();
   else if (current === "services") await renderServices();
+  else if (current === "advisories") await renderAdvisories();
   else await renderTriage();
 }
 
 window.addEventListener("hashchange", route);
 refreshStatus();
 route();
+
+const ADVISORY_SAMPLE = {
+  service: "checkout-api",
+  error: "HikariPool-1 - Connection is not available, request timed out after 30000ms.",
+  tags: ["connection-pool", "timeout"],
+};
+
+const STATUS_PILL = { open: "pill-warn", acknowledged: "pill-muted", resolved: "pill-muted", dismissed: "pill-muted" };
+
+async function renderAdvisories() {
+  view().innerHTML = `<div class="skeleton"></div>`;
+  let list;
+  try { list = await api("/advisories"); } catch (e) {
+    view().innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p></div>`;
+    return;
+  }
+
+  const open = list.filter((a) => a.status === "open" || a.status === "acknowledged");
+  view().innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1>Advisories</h1>
+        <p>Services that have not had this failure yet but share an implicated dependency with the ones that did. The exposure is an edge in the graph, not a line in any write-up.</p>
+      </div>
+      <button type="button" class="btn btn-sm" id="raise">Raise from a sample alert</button>
+    </div>
+    <div class="toolbar" style="margin-bottom:12px">
+      <span class="eyebrow" style="margin:0">${open.length} outstanding of ${list.length}</span>
+    </div>
+    <div id="adv-list"></div>`;
+
+  const paint = (items) => {
+    $("#adv-list").innerHTML = items.length ? items.map((a) => `
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-h"><span class="name">${esc(a.service)}</span>
+          <span class="pill ${STATUS_PILL[a.status] || "pill-muted"}">${esc(a.status)}</span></div>
+        <div class="meta">${esc(a.family)} · owned by ${esc(a.routed_to || "nobody")}${a.ask ? ` · ask ${esc(a.ask)}` : ""}${a.seen_count > 1 ? ` · seen ${a.seen_count}×` : ""}${a.reopened_at ? " · reopened" : ""}</div>
+        <div class="meta">${esc(a.why)}</div>
+        <div class="chips">${a.via.map((d) => `<span class="chip chip-dep">${esc(d)}</span>`).join("")}${a.because_of.map((i) => `<a class="chip chip-ev" href="#/incidents/${esc(i)}">${esc(i)}</a>`).join("")}</div>
+        ${a.suggested_fix ? `<div class="fix">${esc(a.suggested_fix)}</div>` : ""}
+        <div class="form-foot">
+          ${["acknowledged", "resolved", "dismissed"].filter((s) => s !== a.status)
+            .map((s) => `<button type="button" class="btn btn-sm" data-adv="${esc(a.id)}" data-status="${s}">${s}</button>`).join("")}
+        </div>
+      </div>`).join("") : `<div class="card"><p class="empty">Nothing outstanding. Raise one from a sample alert, or POST /advisories.</p></div>`;
+  };
+
+  view().addEventListener("click", async (e) => {
+    const raise = e.target.closest("#raise");
+    if (raise) {
+      raise.disabled = true;
+      try { await api("/advisories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ADVISORY_SAMPLE) }); await renderAdvisories(); }
+      catch (err) { showBanner(err.message); raise.disabled = false; }
+      return;
+    }
+    const btn = e.target.closest("[data-adv]");
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      await api(`/advisories/${encodeURIComponent(btn.dataset.adv)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: btn.dataset.status }),
+      });
+      await renderAdvisories();
+    } catch (err) { showBanner(err.message); btn.disabled = false; }
+  });
+
+  paint(list);
+}

@@ -26,7 +26,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -102,6 +102,19 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+# Writes are unauthenticated unless DEJAVU_WRITE_TOKEN is set, which keeps
+# local development and the tests key-free. Set it on a public deployment and
+# POST/PATCH need the matching X-Write-Token header.
+# shortcut: one shared token, no users or scopes; upgrade if advisories ever
+# carry per-team permissions.
+WRITE_TOKEN = os.environ.get("DEJAVU_WRITE_TOKEN", "")
+
+
+def require_write(x_write_token: str = Header(default="")):
+    if WRITE_TOKEN and x_write_token != WRITE_TOKEN:
+        raise HTTPException(status_code=401, detail="X-Write-Token missing or wrong")
 
 
 def require_graph():
@@ -398,7 +411,7 @@ def advisory_out(advisory) -> AdvisoryOut:
     )
 
 
-@app.post("/advisories", response_model=List[AdvisoryOut])
+@app.post("/advisories", response_model=List[AdvisoryOut], dependencies=[Depends(require_write)])
 def post_advisories(request: RaiseRequest):
     """Raise an advisory for every peer exposed by this alert.
 
@@ -425,7 +438,7 @@ def get_advisories(
     ]
 
 
-@app.patch("/advisories/{advisory_id}", response_model=AdvisoryOut)
+@app.patch("/advisories/{advisory_id}", response_model=AdvisoryOut, dependencies=[Depends(require_write)])
 def patch_advisory(advisory_id: str, update: StatusUpdate):
     """Acknowledge, resolve or dismiss.
 
