@@ -15,9 +15,7 @@ The second question is the reason this is a graph and not a text search. That
 two services share a connection-pool library is an *edge*; it appears in the
 wording of no incident, so no amount of searching the text can find it.
 
-## Submission
-
-**Graph Hacks — Track: Agent Memory and Coordination**
+## At a glance
 
 | | |
 |---|---|
@@ -497,21 +495,31 @@ bitten:
 `dejavu/static/vercel.json` optionally fronts the page with Vercel's CDN,
 proxying the API paths back to Render so everything stays same-origin.
 
-## Status
+## What is here
 
-- **Phase 0** environment — done
-- **Phase 1** schema and data, 27 incidents across 6 root-cause families — done
-- **Phase 2** retrieval, scoring, at-risk services, CLI — done
-- **Phase 3** agent loop — done. The OpenAI explainer has been run against
-  the real API ($0.000245 per briefing)
-- **Phase 4a** HTTP API — done
-- **Phase 4b** demo UI — done. Plain HTML, CSS and JS in `dejavu/static/`,
-  served by the API itself with no build step: triage with demo presets,
-  incident catalog and detail, and the service dependency map
-- **Phase 4c** evaluation harness — done
-- **Phase 5** deployed on Render, with a self-seeding graph and a keepalive
-  — done
-- **Phase 6** demo video — recording is the last step
-- **Coordination layer** — `:Team`, `:Engineer` and `:Advisory`, expertise
-  routing, family-keyed dedupe, status transitions, an independently checked
-  evaluation, and an advisories page in the UI — done
+| | |
+|---|---|
+| `dejavu/retrieve.py` | scored retrieval over the graph |
+| `dejavu/coordinate.py` | ownership and expertise routing |
+| `dejavu/advisory.py` | raising, deduplicating and resolving advisories |
+| `dejavu/evaluate.py` | retrieval metrics and the independent advisory oracle |
+| `dejavu/agent.py` | the three-step loop; the model only writes prose |
+| `dejavu/api.py` | FastAPI, serving the UI from `dejavu/static/` |
+| `data/incidents.json` | 27 synthetic incidents across 6 root-cause families |
+
+137 tests. `scripts/evaluate.py` is the one to run if you only run one thing:
+it reports whether retrieval ranks the right root cause and whether advisories
+agree with an independently computed answer.
+
+### Known limits
+
+- The error-signature match is exact after normalisation, so an error with an
+  extra clause (`x509: ... current time <TS> is after <TS>`) is found by tags
+  rather than by signature. Shared tags cover it; nothing pretends otherwise.
+- The advisory exposure rule is conservative: a dependency must be common to
+  every service that has had a family, so families whose incidents share no
+  dependency warn nobody.
+- The spend ledger is a local file, so on an ephemeral host the cap resets on
+  restart.
+- The deployed demo's write endpoints are open unless `DEJAVU_WRITE_TOKEN` is
+  set, and the UI sends no token, so enabling it disables the UI's buttons.
