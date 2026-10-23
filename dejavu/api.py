@@ -409,8 +409,7 @@ def post_advisories(request: RaiseRequest):
     graph = require_graph()
     alert = Alert(service=request.service, error=request.error, tags=request.tags)
     matches = find_similar(graph, alert, limit=request.limit)
-    peers = at_risk_services(graph, alert)
-    return [advisory_out(a) for a in raise_advisories(graph, alert, matches, peers)]
+    return [advisory_out(a) for a in raise_advisories(graph, alert, matches)]
 
 
 @app.get("/advisories", response_model=List[AdvisoryOut])

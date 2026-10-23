@@ -12,6 +12,10 @@
         {
           "name": "lettuce",
           "version": "6.2.6"
+        },
+        {
+          "name": "postgres-primary",
+          "version": "15.4"
         }
       ]
     },
@@ -27,6 +31,14 @@
         {
           "name": "kafka-clients",
           "version": "3.4.0"
+        },
+        {
+          "name": "postgres-primary",
+          "version": "15.4"
+        },
+        {
+          "name": "kafka-broker",
+          "version": "3.4"
         }
       ]
     },
@@ -42,6 +54,10 @@
         {
           "name": "lettuce",
           "version": "6.2.6"
+        },
+        {
+          "name": "postgres-primary",
+          "version": "15.4"
         }
       ]
     },
@@ -53,6 +69,10 @@
         {
           "name": "HikariCP",
           "version": "5.0.1"
+        },
+        {
+          "name": "postgres-primary",
+          "version": "15.4"
         }
       ]
     },
@@ -87,6 +107,10 @@
         {
           "name": "redis-py",
           "version": "5.0.1"
+        },
+        {
+          "name": "kafka-broker",
+          "version": "3.4"
         }
       ]
     },
@@ -132,6 +156,25 @@
         {
           "name": "cert-manager",
           "version": "1.13.2"
+        }
+      ]
+    },
+    {
+      "name": "billing-worker",
+      "team": "payments",
+      "language": "java",
+      "dependencies": [
+        {
+          "name": "HikariCP",
+          "version": "5.0.1"
+        },
+        {
+          "name": "postgres-primary",
+          "version": "15.4"
+        },
+        {
+          "name": "kafka-broker",
+          "version": "3.4"
         }
       ]
     }

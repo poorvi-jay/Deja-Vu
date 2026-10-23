@@ -64,6 +64,7 @@ def test_triage_reports_peers_sharing_a_dependency(client):
         "checkout-api",
         "order-service",
         "inventory-service",
+        "billing-worker",
     }
 
 
@@ -107,7 +108,7 @@ def test_get_unknown_incident_is_404(client):
 
 def test_list_services_includes_the_service_with_no_incidents(client):
     services = {s["service"]: s for s in client.get("/services").json()}
-    assert len(services) == 9
+    assert len(services) == 10
     # refund-service is the demo's whole point: exposed, never bitten.
     assert services["refund-service"]["incidents"] == 0
     assert "HikariCP" in services["refund-service"]["dependencies"]
@@ -184,13 +185,17 @@ def no_advisories(client):
 
 def test_post_advisories_warns_the_exposed_peer(client, no_advisories):
     body = client.post("/advisories", json=CHECKOUT_POOL_ALERT).json()
-    assert [a["service"] for a in body] == ["refund-service"]
-    assert body[0]["status"] == "open"
-    assert body[0]["via"] == ["HikariCP"]
-    assert body[0]["routed_to"] == "payments"
-    assert body[0]["because_of"]
-    assert body[0]["suggested_fix"]
-    assert "HikariCP" in body[0]["why"]
+    assert {a["service"] for a in body} == {"refund-service", "billing-worker"}
+
+    refund = next(a for a in body if a["service"] == "refund-service")
+    assert refund["status"] == "open"
+    # Two implicated dependencies, one advisory — the pool library and the
+    # primary they all share.
+    assert refund["via"] == ["HikariCP", "postgres-primary"]
+    assert refund["routed_to"] == "payments"
+    assert refund["because_of"]
+    assert refund["suggested_fix"]
+    assert "HikariCP" in refund["why"]
 
 
 def test_post_advisories_is_idempotent_over_http(client, no_advisories):
@@ -198,16 +203,17 @@ def test_post_advisories_is_idempotent_over_http(client, no_advisories):
     client.post("/advisories", json=CHECKOUT_POOL_ALERT)
 
     listed = client.get("/advisories").json()
-    assert len(listed) == 1
-    assert listed[0]["seen_count"] == 2
+    assert len(listed) == 2
+    assert all(a["seen_count"] == 2 for a in listed)
 
 
 def test_get_advisories_filters_by_status_and_team(client, no_advisories):
     client.post("/advisories", json=CHECKOUT_POOL_ALERT)
 
-    assert len(client.get("/advisories?status=open").json()) == 1
+    assert len(client.get("/advisories?status=open").json()) == 2
     assert client.get("/advisories?status=resolved").json() == []
-    assert len(client.get("/advisories?team=payments").json()) == 1
+    # Both exposed peers are payments services.
+    assert len(client.get("/advisories?team=payments").json()) == 2
     assert client.get("/advisories?team=platform").json() == []
 
 
@@ -233,9 +239,9 @@ def test_dismissed_advisory_is_not_reopened_through_the_api(client, no_advisorie
     client.patch(f"/advisories/{advisory_id}", json={"status": "dismissed"})
 
     client.post("/advisories", json=CHECKOUT_POOL_ALERT)
-    listed = client.get("/advisories").json()
-    assert listed[0]["status"] == "dismissed"
-    assert listed[0]["seen_count"] == 2
+    dismissed = next(a for a in client.get("/advisories").json() if a["id"] == advisory_id)
+    assert dismissed["status"] == "dismissed"
+    assert dismissed["seen_count"] == 2
 
 
 def test_patch_unknown_advisory_is_404(client, no_advisories):

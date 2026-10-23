@@ -52,3 +52,17 @@ def family_of(tags: Iterable[str]) -> str:
 def slug_of(tags: Iterable[str]) -> str:
     """The stable identifier for the family these tags indicate."""
     return SLUGS[family_of(tags)]
+
+
+def markers_of(tags: Iterable[str]) -> List[str]:
+    """The marker tags of the family these tags indicate.
+
+    An advisory needs this rather than the slug: the family "TLS and
+    certificates" is evidenced by `tls` OR `certificate`, and an incident
+    carrying only one of them still belongs to it.
+    """
+    name = family_of(tags)
+    for family, markers in FAMILIES:
+        if family == name:
+            return sorted(markers)
+    return []

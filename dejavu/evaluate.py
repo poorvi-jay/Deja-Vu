@@ -21,7 +21,7 @@ nothing must return nothing. A system that always answers is not retrieving,
 it is guessing.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
@@ -153,4 +153,151 @@ def report(results: dict) -> str:
         if not x.correct:
             lines.append(f"  FAILED: {x.name} -> returned {', '.join(x.returned)}")
     lines.append("")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Advisories
+# ---------------------------------------------------------------------------
+#
+# These are checked against an INDEPENDENT ORACLE: who should be warned is
+# recomputed in plain Python from data/incidents.json, by a different method
+# than the Cypher under test. Asserting the query against itself proves
+# nothing; two methods agreeing is evidence.
+
+
+def expected_warned(data: dict, service: str, tags: List[str]) -> set:
+    """Who should be warned about this alert, computed without the graph.
+
+    Mirrors the two rules in EXPOSED_QUERY:
+      - the dependency must be common to EVERY service that has had this
+        family, otherwise it is not implicated;
+      - a peer that has already had this family is not warned.
+    """
+    from dejavu.families import markers_of
+
+    markers = set(markers_of(tags))
+    if not markers:
+        return set()
+
+    deps = {s["name"]: {d["name"] for d in s["dependencies"]} for s in data["services"]}
+
+    had_family = {
+        inc["service"] for inc in data["incidents"] if markers & set(inc["tags"])
+    }
+    if not had_family:
+        return set()
+
+    # Dependencies every affected service shares.
+    implicated = set.intersection(*(deps[s] for s in had_family))
+    if not implicated:
+        return set()
+
+    mine = deps.get(service, set()) & implicated
+    return {
+        peer
+        for peer, peer_deps in deps.items()
+        if peer != service and (peer_deps & mine) and peer not in had_family
+    }
+
+
+@dataclass
+class AdvisoryResult:
+    name: str
+    service: str
+    expected: set
+    warned: set
+    advisory_count: int
+    duplicate_ids: List[str] = field(default_factory=list)
+
+    @property
+    def correct(self) -> bool:
+        return self.warned == self.expected and not self.duplicate_ids
+
+
+def run_advisories(graph, spec: dict = None) -> dict:
+    """Raise advisories for every eval alert and check who was warned.
+
+    Writes to the graph, so it clears only the advisories it created — never
+    everything, in case the instance holds real ones.
+    """
+    from dejavu.advisory import list_advisories, raise_advisories
+    from dejavu.loader import read_data
+    from dejavu.retrieve import Alert, find_similar
+
+    spec = spec if spec is not None else load_eval()
+    data = read_data()
+    results, created = [], set()
+
+    for case in spec["alerts"] + spec.get("negatives", []):
+        alert = Alert(
+            service=case["service"], error=case["error"], tags=case.get("tags", [])
+        )
+        matches = find_similar(graph, alert, limit=5)
+        raised = raise_advisories(graph, alert, matches)
+        created.update(a.id for a in raised)
+
+        ids = [a.id for a in raised]
+        results.append(
+            AdvisoryResult(
+                name=case["name"],
+                service=case["service"],
+                expected=expected_warned(data, case["service"], case.get("tags", []))
+                if matches
+                else set(),
+                warned={a.service for a in raised},
+                advisory_count=len(raised),
+                duplicate_ids=sorted({i for i in ids if ids.count(i) > 1}),
+            )
+        )
+
+    # Idempotence, measured rather than assumed: re-raise everything and check
+    # the population did not grow.
+    before = len(list_advisories(graph))
+    for case in spec["alerts"]:
+        alert = Alert(service=case["service"], error=case["error"], tags=case["tags"])
+        raise_advisories(graph, alert, find_similar(graph, alert, limit=5))
+    after = len(list_advisories(graph))
+
+    for advisory_id in created:
+        graph.query("MATCH (a:Advisory {id: $id}) DETACH DELETE a", params={"id": advisory_id})
+
+    return {
+        "cases": results,
+        "correct": sum(r.correct for r in results),
+        "total": len(results),
+        "advisories_before_rerun": before,
+        "advisories_after_rerun": after,
+        "idempotent": before == after,
+    }
+
+
+def advisory_report(results: dict) -> str:
+    lines = [
+        "",
+        "ADVISORY EVALUATION",
+        "=" * 78,
+        f"{'service':<22}{'ok':<5}{'warned':<34}expected",
+        "-" * 78,
+    ]
+    for r in results["cases"]:
+        lines.append(
+            f"{r.service:<22}"
+            f"{'yes' if r.correct else 'NO':<5}"
+            f"{(', '.join(sorted(r.warned)) or '(nobody)'):<34}"
+            f"{', '.join(sorted(r.expected)) or '(nobody)'}"
+        )
+        if not r.correct:
+            lines.append(f"{'':<22}^ {r.name}")
+            if r.duplicate_ids:
+                lines.append(f"{'':<22}  duplicates: {', '.join(r.duplicate_ids)}")
+    lines += [
+        "-" * 78,
+        f"agreement    {results['correct']}/{results['total']} cases match the "
+        f"independent oracle",
+        f"idempotent   {'yes' if results['idempotent'] else 'NO'} "
+        f"({results['advisories_before_rerun']} advisories before re-raising, "
+        f"{results['advisories_after_rerun']} after)",
+        "",
+    ]
     return "\n".join(lines)

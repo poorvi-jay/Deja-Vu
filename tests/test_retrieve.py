@@ -173,7 +173,19 @@ def test_unknown_error_with_no_tags_finds_nothing(graph):
 
 def test_at_risk_finds_peers_through_shared_dependency(graph, pool_alert):
     peers = {p["service"]: p for p in at_risk_services(graph, pool_alert)}
-    # refund-service shares HikariCP with exactly these three.
-    assert set(peers) == {"checkout-api", "order-service", "inventory-service"}
+    # Every service sharing a dependency with refund-service.
+    assert set(peers) == {
+        "checkout-api",
+        "order-service",
+        "inventory-service",
+        "billing-worker",
+    }
     assert all("HikariCP" in p["via"] for p in peers.values())
-    assert all(int(p["past_incidents"]) > 0 for p in peers.values())
+    # Three have hit pool exhaustion; billing-worker is exposed and never has,
+    # which is exactly what an advisory is for.
+    assert int(peers["billing-worker"]["past_incidents"]) == 0
+    assert all(
+        int(p["past_incidents"]) > 0
+        for name, p in peers.items()
+        if name != "billing-worker"
+    )
