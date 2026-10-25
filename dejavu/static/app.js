@@ -833,7 +833,7 @@ async function renderAdvisories() {
         <div class="meta">${esc(a.why)}</div>
         <div class="chips">${a.via.map((d) => `<span class="chip chip-dep">${esc(d)}</span>`).join("")}${a.because_of.map((i) => `<a class="chip chip-ev" href="#/incidents/${esc(i)}">${esc(i)}</a>`).join("")}</div>
         ${a.suggested_fix ? `<div class="fix">${esc(a.suggested_fix)}</div>` : ""}
-        <div class="form-foot">
+        <div class="form-foot" style="justify-content:flex-start;gap:8px">
           ${["acknowledged", "resolved", "dismissed"].filter((s) => s !== a.status)
             .map((s) => `<button type="button" class="btn btn-sm" data-adv="${esc(a.id)}" data-status="${s}">${s}</button>`).join("")}
         </div>
